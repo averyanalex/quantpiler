@@ -67,7 +67,7 @@ impl std::hash::Hash for Op {
                 distance: _,
             } => 9,
         };
-        id.hash(state);
+        state.write_u8(id);
     }
 }
 

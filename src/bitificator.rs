@@ -28,7 +28,7 @@ impl std::hash::Hash for Gate {
             Gate::Or(_) => 4,
             Gate::Xor(_) => 5,
         };
-        id.hash(state);
+        state.write_u8(id);
     }
 }
 
