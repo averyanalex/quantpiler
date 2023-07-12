@@ -1,0 +1,9 @@
+[package]
+name = "quantpiler"
+version = "0.1.0"
+authors = ["Alexander Averyanov <alex@averyan.ru>"]
+edition = "2021"
+
+[dependencies]
+itertools = "0.11.0"
+num = "0.4.0"
