@@ -1,9 +1,7 @@
-use std::{
-    collections::{HashMap, HashSet},
-    rc::Rc,
-};
+use std::rc::Rc;
 
 use itertools::Itertools;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::unwrapper::Op;
 
@@ -12,9 +10,9 @@ pub enum Gate {
     Argument { name: String, index: u32 },
     Constant(bool),
     Not(Rc<Gate>),
-    And(Vec<Rc<Self>>),
-    Or(Vec<Rc<Self>>),
-    Xor(Vec<Rc<Self>>),
+    And(FxHashSet<Rc<Self>>),
+    Or(FxHashSet<Rc<Self>>),
+    Xor(FxHashSet<Rc<Self>>),
 }
 
 impl std::hash::Hash for Gate {
@@ -33,7 +31,7 @@ impl std::hash::Hash for Gate {
 }
 
 impl Gate {
-    pub fn is_const_true(&self) -> bool {
+    pub const fn is_const_true(&self) -> bool {
         match self {
             Self::Constant(value) => *value,
             _ => false,
@@ -47,62 +45,60 @@ impl Gate {
         }
     }
 
-    pub fn argument(name: String, index: u32, dedup_cache: &mut HashSet<Rc<Gate>>) -> Rc<Self> {
-        dedup_gate(Rc::new(Self::Argument { name, index }), dedup_cache)
+    pub fn argument(name: String, index: u32, dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
+        dedup_gate(Self::Argument { name, index }, dedup_cache)
     }
 
-    pub fn constant(value: bool, dedup_cache: &mut HashSet<Rc<Gate>>) -> Rc<Self> {
-        dedup_gate(Rc::new(Self::Constant(value)), dedup_cache)
+    pub fn constant(value: bool, dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
+        dedup_gate(Self::Constant(value), dedup_cache)
     }
 
-    pub fn not(bit: Rc<Gate>, dedup_cache: &mut HashSet<Rc<Gate>>) -> Rc<Self> {
+    pub fn not(bit: Rc<Gate>, dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
         match bit.as_ref() {
             Self::Constant(value) => Self::constant(!value, dedup_cache),
             Self::Not(bit_in_not) => bit_in_not.clone(),
-            _ => dedup_gate(Rc::new(Self::Not(bit)), dedup_cache),
+            _ => dedup_gate(Self::Not(bit), dedup_cache),
         }
     }
 
-    pub fn and(bits: &[Rc<Gate>], dedup_cache: &mut HashSet<Rc<Gate>>) -> Rc<Self> {
+    pub fn and(bits: &[Rc<Gate>], dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
         if bits.iter().any(|b| b.is_const_false()) {
             Self::constant(false, dedup_cache)
         } else if bits.len() == 1 {
             bits[0].clone()
         } else {
             dedup_gate(
-                Rc::new(Self::And(
+                Self::And(
                     bits.iter()
                         .filter(|b| !b.is_const_true())
                         .cloned()
-                        .unique()
                         .collect(),
-                )),
+                ),
                 dedup_cache,
             )
         }
     }
 
-    pub fn or(bits: &[Rc<Gate>], dedup_cache: &mut HashSet<Rc<Gate>>) -> Rc<Self> {
+    pub fn or(bits: &[Rc<Gate>], dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
         if bits.iter().any(|b| b.is_const_true()) {
             Self::constant(true, dedup_cache)
         } else if bits.len() == 1 {
             bits[0].clone()
         } else {
             dedup_gate(
-                Rc::new(Self::Or(
+                Self::Or(
                     bits.iter()
                         .filter(|b| !b.is_const_false())
                         .cloned()
-                        .unique()
                         .collect(),
-                )),
+                ),
                 dedup_cache,
             )
         }
     }
 
-    pub fn xor(bits: &[Rc<Gate>], dedup_cache: &mut HashSet<Rc<Gate>>) -> Rc<Self> {
-        let bits: Vec<Rc<Self>> = bits
+    pub fn xor(bits: &[Rc<Gate>], dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
+        let bits: FxHashSet<_> = bits
             .iter()
             .filter(|b| !b.is_const_false()) // false in XOR does nothing
             .counts()
@@ -111,40 +107,39 @@ impl Gate {
                 if count % 2 == 1 {
                     Some(b.clone())
                 } else {
-                    None
+                    None // pairs of identical gates are mutually destroyed
                 }
-            }) // pairs of identical gates are mutually destroyed
+            })
             .collect();
 
         if bits.is_empty() {
             Self::constant(false, dedup_cache)
         } else if bits.len() == 1 {
-            bits[0].clone()
+            bits.iter().next().unwrap().clone()
         } else if bits.iter().any(|b| b.is_const_true()) {
-            let bits_no_true = bits
-                .into_iter()
-                .filter(|b| !b.is_const_true())
-                .collect_vec();
+            let bits_no_true: FxHashSet<_> =
+                bits.into_iter().filter(|b| !b.is_const_true()).collect();
 
             let xor_without_true = if bits_no_true.is_empty() {
                 Self::constant(false, dedup_cache)
             } else if bits_no_true.len() == 1 {
-                bits_no_true[0].clone()
+                bits_no_true.iter().next().unwrap().clone()
             } else {
-                dedup_gate(Rc::new(Self::Xor(bits_no_true)), dedup_cache)
+                dedup_gate(Self::Xor(bits_no_true), dedup_cache)
             };
 
             Self::not(xor_without_true, dedup_cache)
         } else {
-            dedup_gate(Rc::new(Self::Xor(bits)), dedup_cache)
+            dedup_gate(Self::Xor(bits), dedup_cache)
         }
     }
 }
 
-fn dedup_gate(gate: Rc<Gate>, dedup_cache: &mut HashSet<Rc<Gate>>) -> Rc<Gate> {
+fn dedup_gate(gate: Gate, dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Gate> {
     match dedup_cache.get(&gate) {
         Some(existing_gate) => existing_gate.clone(),
         None => {
+            let gate = Rc::new(gate);
             dedup_cache.insert(gate.clone());
             gate
         }
@@ -153,8 +148,8 @@ fn dedup_gate(gate: Rc<Gate>, dedup_cache: &mut HashSet<Rc<Gate>>) -> Rc<Gate> {
 
 fn columns_of_gates<'a, T: IntoIterator<Item = &'a Rc<Op>>>(
     args: T,
-    op_cache: &mut HashMap<Rc<Op>, Rc<Vec<Rc<Gate>>>>,
-    gates_dedup_cache: &mut HashSet<Rc<Gate>>,
+    op_cache: &mut FxHashMap<Rc<Op>, Rc<Vec<Rc<Gate>>>>,
+    gates_dedup_cache: &mut FxHashSet<Rc<Gate>>,
 ) -> Vec<Vec<Rc<Gate>>> {
     let executed_args = args
         .into_iter()
@@ -173,8 +168,8 @@ fn columns_of_gates<'a, T: IntoIterator<Item = &'a Rc<Op>>>(
 
 pub fn bitificate_op_rec(
     op: &Rc<Op>,
-    op_cache: &mut HashMap<Rc<Op>, Rc<Vec<Rc<Gate>>>>,
-    gates_dedup_cache: &mut HashSet<Rc<Gate>>,
+    op_cache: &mut FxHashMap<Rc<Op>, Rc<Vec<Rc<Gate>>>>,
+    gates_dedup_cache: &mut FxHashSet<Rc<Gate>>,
 ) -> Rc<Vec<Rc<Gate>>> {
     match op_cache.get(op) {
         Some(gates) => gates.clone(),
@@ -257,6 +252,15 @@ pub fn bitificate_op_rec(
                 _ => todo!(),
             };
 
+            // let gates = gates
+            //     .into_iter()
+            //     .rev()
+            //     .skip_while(|g| g.is_const_false())
+            //     .collect_vec()
+            //     .into_iter()
+            //     .rev()
+            //     .collect_vec();
+
             let rc_gates = Rc::new(gates);
             op_cache.insert(op.clone(), rc_gates.clone());
             rc_gates
@@ -265,8 +269,8 @@ pub fn bitificate_op_rec(
 }
 
 pub fn bitificate_op(op: &Rc<Op>) -> Vec<Rc<Gate>> {
-    let mut op_cache = HashMap::new();
-    let mut gates_dedup_cache = HashSet::new();
+    let mut op_cache = FxHashMap::default();
+    let mut gates_dedup_cache = FxHashSet::default();
     bitificate_op_rec(op, &mut op_cache, &mut gates_dedup_cache)
         .iter()
         .cloned()

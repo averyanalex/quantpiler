@@ -1,13 +1,14 @@
-use std::{collections::HashMap, ops::Sub, rc::Rc};
+use std::{ops::Sub, rc::Rc};
 
 use num::{One, Zero};
+use rustc_hash::FxHashMap;
 
 use crate::bitificator::Gate;
 
 fn execute_gates_rec<T>(
     gate: &Rc<Gate>,
-    args: &HashMap<String, Vec<T>>,
-    cache: &mut HashMap<Rc<Gate>, T>,
+    args: &FxHashMap<String, Vec<T>>,
+    cache: &mut FxHashMap<Rc<Gate>, T>,
 ) -> T
 where
     T: Zero + One + Sub<Output = T>,
@@ -58,12 +59,12 @@ where
     }
 }
 
-pub fn execute_gates<T>(gates: Vec<Rc<Gate>>, args: &HashMap<String, Vec<T>>) -> Vec<T>
+pub fn execute_gates<T>(gates: Vec<Rc<Gate>>, args: &FxHashMap<String, Vec<T>>) -> Vec<T>
 where
     T: Zero + One + Sub<Output = T>,
     T: Clone,
 {
-    let mut cache = HashMap::new();
+    let mut cache = FxHashMap::default();
     gates
         .iter()
         .map(|g| execute_gates_rec(g, args, &mut cache))
