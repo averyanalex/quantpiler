@@ -34,17 +34,8 @@ where
                         .map(|g| execute_gates_rec(g, args, cache))
                         .fold(T::one(), |acc, x| acc * x)
                 }
-                Gate::Or(gates) => {
-                    assert!(!gates.is_empty());
-                    T::one()
-                        - gates
-                            .iter()
-                            .map(|g| execute_gates_rec(g, args, cache))
-                            .map(|x| T::one() - x)
-                            .fold(T::one(), |acc, x| acc * x)
-                }
                 Gate::Xor(gates) => {
-                    assert!(gates.len() <= 2);
+                    assert!(!gates.is_empty());
                     gates
                         .iter()
                         .map(|g| execute_gates_rec(g, args, cache))

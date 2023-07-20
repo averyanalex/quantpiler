@@ -7,4 +7,9 @@ edition = "2021"
 [dependencies]
 itertools = "0.11.0"
 num = "0.4.0"
+rand = "0.8.5"
 rustc-hash = "1.1.0"
+
+# [profile.release]
+# lto = true
+# codegen-units = 1

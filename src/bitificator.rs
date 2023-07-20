@@ -11,8 +11,19 @@ pub enum Gate {
     Constant(bool),
     Not(Rc<Gate>),
     And(FxHashSet<Rc<Self>>),
-    Or(FxHashSet<Rc<Self>>),
     Xor(FxHashSet<Rc<Self>>),
+}
+
+impl Gate {
+    pub fn cost(&self) -> usize {
+        match self {
+            Gate::Argument { name: _, index: _ } => 1,
+            Gate::Constant(_) => 1,
+            Gate::Not(arg) => arg.cost(),
+            Gate::And(args) => args.len(),
+            Gate::Xor(args) => args.len(),
+        }
+    }
 }
 
 impl std::hash::Hash for Gate {
@@ -23,8 +34,7 @@ impl std::hash::Hash for Gate {
             Gate::Constant(_) => 1,
             Gate::Not(_) => 2,
             Gate::And(_) => 3,
-            Gate::Or(_) => 4,
-            Gate::Xor(_) => 5,
+            Gate::Xor(_) => 4,
         };
         state.write_u8(id);
     }
@@ -62,44 +72,78 @@ impl Gate {
     }
 
     pub fn and(bits: &[Rc<Gate>], dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
-        if bits.iter().any(|b| b.is_const_false()) {
+        assert!(!bits.is_empty());
+
+        for (a, b) in bits.iter().cartesian_product(bits.iter()) {
+            if *a == Self::not(b.clone(), dedup_cache) {
+                return Self::constant(false, dedup_cache);
+            }
+        }
+
+        let flattened_bits = bits
+            .iter()
+            .flat_map(|b| match b.as_ref() {
+                Gate::And(args) => args.iter().cloned().collect_vec(),
+                _ => vec![b.clone()],
+            })
+            .unique()
+            .collect_vec();
+
+        if flattened_bits.iter().any(|b| b.is_const_false()) {
             Self::constant(false, dedup_cache)
-        } else if bits.len() == 1 {
-            bits[0].clone()
+        } else if flattened_bits.len() == 1 {
+            flattened_bits[0].clone()
         } else {
-            dedup_gate(
-                Self::And(
-                    bits.iter()
-                        .filter(|b| !b.is_const_true())
-                        .cloned()
-                        .collect(),
-                ),
-                dedup_cache,
-            )
+            let not_const_bits = flattened_bits
+                .into_iter()
+                .filter(|b| !b.is_const_true())
+                .collect_vec();
+
+            assert!(!not_const_bits.is_empty());
+
+            if not_const_bits.len() == 1 {
+                not_const_bits[0].clone()
+            } else {
+                dedup_gate(Self::And(not_const_bits.into_iter().collect()), dedup_cache)
+            }
         }
     }
 
     pub fn or(bits: &[Rc<Gate>], dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
-        if bits.iter().any(|b| b.is_const_true()) {
-            Self::constant(true, dedup_cache)
-        } else if bits.len() == 1 {
-            bits[0].clone()
-        } else {
-            dedup_gate(
-                Self::Or(
-                    bits.iter()
-                        .filter(|b| !b.is_const_false())
-                        .cloned()
-                        .collect(),
-                ),
-                dedup_cache,
-            )
+        for (a, b) in bits.iter().cartesian_product(bits.iter()) {
+            if *a == Self::not(b.clone(), dedup_cache) {
+                return Self::constant(true, dedup_cache);
+            }
         }
+
+        Self::not(
+            Self::and(
+                &bits
+                    .iter()
+                    .map(|g| Self::not(g.clone(), dedup_cache))
+                    .collect_vec(),
+                dedup_cache,
+            ),
+            dedup_cache,
+        )
     }
 
-    pub fn xor(bits: &[Rc<Gate>], dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
-        let bits: FxHashSet<_> = bits
-            .iter()
+    pub fn xor(bits: &[Rc<Self>], dedup_cache: &mut FxHashSet<Rc<Self>>) -> Rc<Self> {
+        let mut inverted_bits_count = 0u32; // we will count NOTed gates in arguments. If NOT % 2 == 0, we just optimize them out, otherwise wrap resulting XOR in NOT
+
+        let flattened_bits = bits.iter().flat_map(|b| match b.as_ref() {
+            Gate::Xor(args) => args.iter().collect_vec(), // can't contain NOTs, just flatten
+            Gate::Not(invirsed_arg) => {
+                inverted_bits_count += 1;
+                match invirsed_arg.as_ref() {
+                    Gate::Xor(args) => args.iter().collect_vec(), // can't contain NOTs, just flatten
+                    _ => vec![invirsed_arg],
+                }
+            }
+            _ => vec![b],
+        });
+
+        let bits: FxHashSet<_> = flattened_bits
             .filter(|b| !b.is_const_false()) // false in XOR does nothing
             .counts()
             .into_iter()
@@ -112,26 +156,36 @@ impl Gate {
             })
             .collect();
 
-        if bits.is_empty() {
+        let res = if bits.is_empty() {
             Self::constant(false, dedup_cache)
         } else if bits.len() == 1 {
-            bits.iter().next().unwrap().clone()
+            bits.into_iter().next().unwrap()
         } else if bits.iter().any(|b| b.is_const_true()) {
-            let bits_no_true: FxHashSet<_> =
+            let bits_without_const_true: FxHashSet<_> =
                 bits.into_iter().filter(|b| !b.is_const_true()).collect();
 
-            let xor_without_true = if bits_no_true.is_empty() {
+            let xor_without_true = if bits_without_const_true.is_empty() {
                 Self::constant(false, dedup_cache)
-            } else if bits_no_true.len() == 1 {
-                bits_no_true.iter().next().unwrap().clone()
+            } else if bits_without_const_true.len() == 1 {
+                bits_without_const_true.into_iter().next().unwrap()
             } else {
-                dedup_gate(Self::Xor(bits_no_true), dedup_cache)
+                dedup_gate(Self::Xor(bits_without_const_true), dedup_cache)
             };
 
             Self::not(xor_without_true, dedup_cache)
         } else {
             dedup_gate(Self::Xor(bits), dedup_cache)
+        };
+
+        if inverted_bits_count % 2 == 1 {
+            Self::not(res, dedup_cache)
+        } else {
+            res
         }
+    }
+
+    pub fn eq(a: Rc<Self>, b: Rc<Self>, dedup_cache: &mut FxHashSet<Rc<Self>>) -> Rc<Self> {
+        Self::not(Self::xor(&[a, b], dedup_cache), dedup_cache)
     }
 }
 
@@ -248,6 +302,16 @@ pub fn bitificate_op_rec(
                         .skip(*distance as usize)
                         .cloned()
                         .collect()
+                }
+                Op::Equal(args) => {
+                    let equal_bits = columns_of_gates(args, op_cache, gates_dedup_cache)
+                        .into_iter()
+                        .map(|column| {
+                            assert_eq!(column.len(), 2);
+                            Gate::eq(column[0].clone(), column[1].clone(), gates_dedup_cache)
+                        })
+                        .collect_vec();
+                    vec![Gate::and(&equal_bits, gates_dedup_cache)]
                 }
                 _ => todo!(),
             };

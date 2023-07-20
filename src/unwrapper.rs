@@ -35,13 +35,14 @@ pub enum Op {
         target: Rc<Self>,
         distance: Rc<Self>,
     },
+    Equal(FxHashSet<Rc<Self>>),
 }
 
 impl std::hash::Hash for Op {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         // Derived hash is too expensive
         let id = match self {
-            Op::Argument { size: _, name: _ } => 0,
+            Op::Argument { .. } => 0,
             Op::Ternary {
                 condition: _,
                 then: _,
@@ -65,6 +66,7 @@ impl std::hash::Hash for Op {
                 target: _,
                 distance: _,
             } => 9,
+            Op::Equal(_) => 10,
         };
         state.write_u8(id);
     }
@@ -121,6 +123,11 @@ fn unwrap_op(
                 target: unwrap_op(vars, dedup_cache, ast_cache, target),
                 distance: unwrap_op(vars, dedup_cache, ast_cache, distance),
             },
+            Ast::Equal(args) => Op::Equal(
+                args.iter()
+                    .map(|arg| unwrap_op(vars, dedup_cache, ast_cache, arg))
+                    .collect(),
+            ),
             _ => todo!("{:?}", ast),
         },
     };

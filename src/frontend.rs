@@ -31,6 +31,7 @@ pub enum Ast {
         values: Vec<Self>,
         instructions: Vec<Self>,
     },
+    Equal(Vec<Self>),
     Xor(Vec<Self>),
     Or(Vec<Self>),
     And(Vec<Self>),
@@ -153,6 +154,10 @@ pub fn parse() -> Ast {
                     ),
                 ],
             ),
+            // Ast::Return(Box::new(Ast::Equal(vec![
+            //     Ast::variable("value"),
+            //     Ast::constant(0x0),
+            // ]))),
             Ast::Return(Box::new(Ast::variable("value"))),
         ],
     )
