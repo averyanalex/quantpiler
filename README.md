@@ -1,7 +1,7 @@
 # Сompiler of classical algorithms into oracles for quantum computing
 
-## Achivements:
-- CRC32 hash function (1 byte input) - 411 qubits.
+## Achievements:
+- CRC32 hash function (4 byte input) - 411 qubits.
 
 ## Architecture:
 1. Parsing source code in AST (planned).
