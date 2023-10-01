@@ -1,63 +1,39 @@
-use std::{ops::Sub, rc::Rc};
+// use std::{ops::Sub, rc::Rc};
 
-use num::{One, Zero};
+use egg::{Id, Language, RecExpr};
+// use num::{One, Zero};
 use rustc_hash::FxHashMap;
 
-use crate::bitificator::Gate;
+use crate::bitificator::Logic;
 
-fn execute_gates_rec<T>(
-    gate: &Rc<Gate>,
-    args: &FxHashMap<String, Vec<T>>,
-    cache: &mut FxHashMap<Rc<Gate>, T>,
-) -> T
-where
-    T: Zero + One + Sub<Output = T>,
-    T: Clone,
+pub fn execute_gates(logic: &RecExpr<Logic>, args: &FxHashMap<String, Vec<bool>>) -> Vec<bool>
+// where
+//     T: Zero + One + Sub<Output = T>,
+//     T: Clone,
 {
-    match cache.get(gate) {
-        Some(result) => result.clone(),
-        None => {
-            let result = match gate.as_ref() {
-                Gate::Argument { name, index } => args[name][*index as usize].clone(),
-                Gate::Constant(value) => {
-                    if *value {
-                        T::one()
-                    } else {
-                        T::zero()
-                    }
-                }
-                Gate::Not(gate) => T::one() - execute_gates_rec(gate, args, cache),
-                Gate::And(gates) => {
-                    assert!(!gates.is_empty());
-                    gates
-                        .iter()
-                        .map(|g| execute_gates_rec(g, args, cache))
-                        .fold(T::one(), |acc, x| acc * x)
-                }
-                Gate::Xor(gates) => {
-                    assert!(!gates.is_empty());
-                    gates
-                        .iter()
-                        .map(|g| execute_gates_rec(g, args, cache))
-                        .fold(T::zero(), |acc, x| {
-                            (acc.clone() * (T::one() - x.clone())) + ((T::one() - acc) * x)
-                        })
-                }
-            };
-            cache.insert(gate.clone(), result.clone());
-            result
-        }
+    let mut done: FxHashMap<Id, bool> = FxHashMap::default();
+
+    for (idx, op) in logic.as_ref().iter().enumerate() {
+        let result = match op {
+            Logic::Xor(args) => {
+                assert!(args.len() >= 2);
+                args.iter().fold(false, |acc, i| acc ^ done[i])
+            }
+            Logic::And(args) => {
+                assert!(args.len() >= 2);
+                args.iter().fold(true, |acc, i| acc & done[i])
+            }
+            Logic::Not(arg) => !done[arg],
+            Logic::Register(_) => continue,
+            Logic::Const(val) => *val,
+            Logic::Arg(arg) => args[&arg.name][arg.index as usize],
+        };
+        done.insert(Id::from(idx), result);
     }
-}
 
-pub fn execute_gates<T>(gates: Vec<Rc<Gate>>, args: &FxHashMap<String, Vec<T>>) -> Vec<T>
-where
-    T: Zero + One + Sub<Output = T>,
-    T: Clone,
-{
-    let mut cache = FxHashMap::default();
-    gates
+    logic.as_ref()[logic.as_ref().len() - 1]
+        .children()
         .iter()
-        .map(|g| execute_gates_rec(g, args, &mut cache))
+        .map(|c| done[c])
         .collect()
 }

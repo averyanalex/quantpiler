@@ -1,342 +1,397 @@
-use std::rc::Rc;
+use std::{fmt::Display, str::FromStr};
 
+use egg::*;
+use good_lp::{
+    constraint, solvers::highs::HighsParallelType, variable, Expression, ProblemVariables,
+    Solution, SolverModel, Variable,
+};
+use indexmap::IndexMap;
 use itertools::Itertools;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::unwrapper::Op;
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum Gate {
-    Argument { name: String, index: u32 },
-    Constant(bool),
-    Not(Rc<Gate>),
-    And(FxHashSet<Rc<Self>>),
-    Xor(FxHashSet<Rc<Self>>),
-}
-
-impl Gate {
-    pub fn cost(&self) -> usize {
-        match self {
-            Gate::Argument { name: _, index: _ } => 1,
-            Gate::Constant(_) => 1,
-            Gate::Not(arg) => arg.cost(),
-            Gate::And(args) => args.len(),
-            Gate::Xor(args) => args.len(),
-        }
+define_language! {
+    pub enum Logic {
+        // ^ (XOR) logic gate, commutable
+        "^" = Xor(Box<[Id]>),
+        // & (AND) logic gate, commutable
+        "&" = And(Box<[Id]>),
+        // ! (NOT) logic gate
+        "!" = Not(Id),
+        // merge gates into register, useful for return op
+        "r" = Register(Box<[Id]>),
+        // just constant value
+        Const(bool),
+        // argument qubit
+        Arg(ArgInfo),
     }
 }
 
-impl std::hash::Hash for Gate {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // Derived hash is too expensive
-        let id = match self {
-            Gate::Argument { name: _, index: _ } => 0,
-            Gate::Constant(_) => 1,
-            Gate::Not(_) => 2,
-            Gate::And(_) => 3,
-            Gate::Xor(_) => 4,
-        };
-        state.write_u8(id);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ArgInfo {
+    pub name: String,
+    pub index: u32,
+}
+
+impl Display for ArgInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}[{}]", self.name, self.index)
     }
 }
 
-impl Gate {
-    pub const fn is_const_true(&self) -> bool {
-        match self {
-            Self::Constant(value) => *value,
-            _ => false,
-        }
+impl FromStr for ArgInfo {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Err(())
     }
+}
 
-    pub fn is_const_false(&self) -> bool {
-        match self {
-            Self::Constant(value) => !value,
-            _ => false,
-        }
-    }
+fn make_rules() -> Vec<Rewrite<Logic, LogicConstantFolding>> {
+    use egg::rewrite as rw;
+    vec![
+        // Commutable
+        rw!("comm-xor"; "(^ ?a ?b)" => "(^ ?b ?a)"),
+        rw!("comm-and"; "(& ?a ?b)" => "(& ?b ?a)"),
+        // Associative
+        rw!("assoc-xor"; "(^ ?a (^ ?b ?c))" => "(^ (^ ?a ?b) ?c)"),
+        rw!("assoc-and"; "(& ?a (& ?b ?c))" => "(& (& ?a ?b) ?c)"),
+        rw!("sus-and"; "(& ?a)" => "?a"),
+        rw!("sus-xor"; "(^ ?a)" => "?a"),
+        // // Logic with constants
+        rw!("xor-with-true"; "(^ ?a true)" => "(! ?a)"),
+        rw!("xor-with-false"; "(^ ?a false)" => "?a"),
+        rw!("and-with-true"; "(& ?a true)" => "?a"),
+        rw!("and-with-false"; "(& ?a false)" => "false"),
+        // Same elements logic
+        rw!("and-same"; "(& ?a ?a)" => "?a"),
+        rw!("and-same-not"; "(& (! ?a) ?a)" => "false"),
+        rw!("xor-same"; "(^ ?a ?a)" => "false"),
+        rw!("xor-same-not"; "(^ (! ?a) ?a)" => "true"),
+        // Etc
+        rw!("cancel-not"; "(! (! ?a))" => "?a"),
+        rw!("and-xor-and"; "(& ?a (^ ?a ?b))" => "(& ?a (! ?b))"),
+        // rw!("create-sus"; "(& ?a (! ?b))" => "(& ?a (^ ?a ?b))"),
+        // rw!("create-not-not"; "?a" => "(! (! ?a))"),
+        rw!("xor-not-not-xor"; "(^ (! ?a) ?b)" => "(! (^ ?a ?b))"),
+        rw!("cancel-xor-not-not"; "(^ (! ?a) (! ?b))" => "(^ ?a ?b)"),
+        // rw!("create-xor-not-not"; "(^ ?a ?b)" => "(^ (! ?a) (! ?b))"),
+        rw!("not-xor-xor-not"; "(! (^ ?a ?b))" => "(^ (! ?a) ?b)"),
+    ]
+}
 
-    pub fn argument(name: String, index: u32, dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
-        dedup_gate(Self::Argument { name, index }, dedup_cache)
-    }
+struct ClassVars {
+    active: Variable,
+    // order: Col,
+    nodes: Vec<Variable>,
+}
 
-    pub fn constant(value: bool, dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
-        dedup_gate(Self::Constant(value), dedup_cache)
-    }
+fn extract_v2(egraph: &EGraph<Logic, LogicConstantFolding>, root: Id) -> RecExpr<Logic> {
+    let mut problem = ProblemVariables::new();
+    let mut constraints = Vec::new();
 
-    pub fn not(bit: Rc<Gate>, dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
-        match bit.as_ref() {
-            Self::Constant(value) => Self::constant(!value, dedup_cache),
-            Self::Not(bit_in_not) => bit_in_not.clone(),
-            _ => dedup_gate(Self::Not(bit), dedup_cache),
-        }
-    }
-
-    pub fn and(bits: &[Rc<Gate>], dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
-        assert!(!bits.is_empty());
-
-        for (a, b) in bits.iter().cartesian_product(bits.iter()) {
-            if *a == Self::not(b.clone(), dedup_cache) {
-                return Self::constant(false, dedup_cache);
-            }
-        }
-
-        let flattened_bits = bits
-            .iter()
-            .flat_map(|b| match b.as_ref() {
-                Gate::And(args) => args.iter().cloned().collect_vec(),
-                _ => vec![b.clone()],
-            })
-            .unique()
-            .collect_vec();
-
-        if flattened_bits.iter().any(|b| b.is_const_false()) {
-            Self::constant(false, dedup_cache)
-        } else if flattened_bits.len() == 1 {
-            flattened_bits[0].clone()
-        } else {
-            let not_const_bits = flattened_bits
-                .into_iter()
-                .filter(|b| !b.is_const_true())
-                .collect_vec();
-
-            assert!(!not_const_bits.is_empty());
-
-            if not_const_bits.len() == 1 {
-                not_const_bits[0].clone()
-            } else {
-                dedup_gate(Self::And(not_const_bits.into_iter().collect()), dedup_cache)
-            }
-        }
-    }
-
-    pub fn or(bits: &[Rc<Gate>], dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Self> {
-        for (a, b) in bits.iter().cartesian_product(bits.iter()) {
-            if *a == Self::not(b.clone(), dedup_cache) {
-                return Self::constant(true, dedup_cache);
-            }
-        }
-
-        Self::not(
-            Self::and(
-                &bits
+    let vars: IndexMap<Id, ClassVars> = egraph
+        .classes()
+        .map(|class| {
+            let cvars = ClassVars {
+                active: problem.add(variable().binary()),
+                // order: model.add_col(),
+                nodes: class
+                    .nodes
                     .iter()
-                    .map(|g| Self::not(g.clone(), dedup_cache))
-                    .collect_vec(),
-                dedup_cache,
-            ),
-            dedup_cache,
-        )
-    }
-
-    pub fn xor(bits: &[Rc<Self>], dedup_cache: &mut FxHashSet<Rc<Self>>) -> Rc<Self> {
-        let mut inverted_bits_count = 0u32; // we will count NOTed gates in arguments. If NOT % 2 == 0, we just optimize them out, otherwise wrap resulting XOR in NOT
-
-        let flattened_bits = bits.iter().flat_map(|b| match b.as_ref() {
-            Gate::Xor(args) => args.iter().collect_vec(), // can't contain NOTs, just flatten
-            Gate::Not(invirsed_arg) => {
-                inverted_bits_count += 1;
-                match invirsed_arg.as_ref() {
-                    Gate::Xor(args) => args.iter().collect_vec(), // can't contain NOTs, just flatten
-                    _ => vec![invirsed_arg],
-                }
-            }
-            _ => vec![b],
-        });
-
-        let bits: FxHashSet<_> = flattened_bits
-            .filter(|b| !b.is_const_false()) // false in XOR does nothing
-            .counts()
-            .into_iter()
-            .filter_map(|(b, count)| {
-                if count % 2 == 1 {
-                    Some(b.clone())
-                } else {
-                    None // pairs of identical gates are mutually destroyed
-                }
-            })
-            .collect();
-
-        let res = if bits.is_empty() {
-            Self::constant(false, dedup_cache)
-        } else if bits.len() == 1 {
-            bits.into_iter().next().unwrap()
-        } else if bits.iter().any(|b| b.is_const_true()) {
-            let bits_without_const_true: FxHashSet<_> =
-                bits.into_iter().filter(|b| !b.is_const_true()).collect();
-
-            let xor_without_true = if bits_without_const_true.is_empty() {
-                Self::constant(false, dedup_cache)
-            } else if bits_without_const_true.len() == 1 {
-                bits_without_const_true.into_iter().next().unwrap()
-            } else {
-                dedup_gate(Self::Xor(bits_without_const_true), dedup_cache)
+                    .map(|_| problem.add(variable().binary()))
+                    .collect(),
             };
-
-            Self::not(xor_without_true, dedup_cache)
-        } else {
-            dedup_gate(Self::Xor(bits), dedup_cache)
-        };
-
-        if inverted_bits_count % 2 == 1 {
-            Self::not(res, dedup_cache)
-        } else {
-            res
-        }
-    }
-
-    pub fn eq(a: Rc<Self>, b: Rc<Self>, dedup_cache: &mut FxHashSet<Rc<Self>>) -> Rc<Self> {
-        Self::not(Self::xor(&[a, b], dedup_cache), dedup_cache)
-    }
-}
-
-fn dedup_gate(gate: Gate, dedup_cache: &mut FxHashSet<Rc<Gate>>) -> Rc<Gate> {
-    match dedup_cache.get(&gate) {
-        Some(existing_gate) => existing_gate.clone(),
-        None => {
-            let gate = Rc::new(gate);
-            dedup_cache.insert(gate.clone());
-            gate
-        }
-    }
-}
-
-fn columns_of_gates<'a, T: IntoIterator<Item = &'a Rc<Op>>>(
-    args: T,
-    op_cache: &mut FxHashMap<Rc<Op>, Rc<Vec<Rc<Gate>>>>,
-    gates_dedup_cache: &mut FxHashSet<Rc<Gate>>,
-) -> Vec<Vec<Rc<Gate>>> {
-    let executed_args = args
-        .into_iter()
-        .map(|arg| bitificate_op_rec(arg, op_cache, gates_dedup_cache))
-        .collect_vec();
-    let max_len = executed_args.iter().map(|a| a.len()).max().unwrap();
-    (0..max_len)
-        .map(|index| {
-            executed_args
-                .iter()
-                .filter_map(|arg| arg.get(index).cloned())
-                .collect_vec()
+            // model.set_col_upper(cvars.order, max_order);
+            (class.id, cvars)
         })
-        .collect_vec()
+        .collect();
+
+    for (id, class) in &vars {
+        let active_nodes_in_class = class
+            .nodes
+            .iter()
+            .fold(Expression::from(0), |acc, active| acc + active);
+
+        constraints.push((active_nodes_in_class - class.active).eq(0));
+
+        for (node, &node_active) in egraph[*id].nodes.iter().zip(&class.nodes) {
+            for child in node.children() {
+                let child_active = vars[child].active;
+                constraints.push(constraint!(node_active - child_active <= 0));
+            }
+        }
+    }
+
+    constraints.push(constraint!(vars[&root].active == 1));
+
+    let cost = vars
+        .iter()
+        .map(|(_, vars)| {
+            vars.nodes
+                .iter()
+                .fold(Expression::from(0), |acc, active| acc + active)
+        })
+        .fold(Expression::from(0), |acc, active| acc + active);
+
+    let problem = constraints.into_iter().fold(
+        problem.minimise(cost).using(good_lp::default_solver),
+        |acc, constraint| acc.with(constraint),
+    );
+
+    let mut problem = problem.set_parallel(HighsParallelType::On).set_threads(16);
+    problem.set_verbose(true);
+
+    let solution = problem.solve().unwrap();
+
+    let mut choices = FxHashMap::default();
+
+    for class in egraph.classes() {
+        let Some((logic, _)) = class
+            .nodes
+            .iter()
+            .zip(vars[&class.id].nodes.iter())
+            .find(|(_, active)| solution.value(**active) == 1.0) else {continue;};
+        choices.insert(class.id, logic);
+    }
+
+    println!("sus {:?}", choices);
+
+    let get_first_enode = |id| choices[&id].clone();
+    let expr = get_first_enode(root).build_recexpr(get_first_enode);
+    println!("sus2");
+    expr
 }
 
-pub fn bitificate_op_rec(
-    op: &Rc<Op>,
-    op_cache: &mut FxHashMap<Rc<Op>, Rc<Vec<Rc<Gate>>>>,
-    gates_dedup_cache: &mut FxHashSet<Rc<Gate>>,
-) -> Rc<Vec<Rc<Gate>>> {
-    match op_cache.get(op) {
-        Some(gates) => gates.clone(),
-        None => {
-            let gates: Vec<Rc<Gate>> = match op.as_ref() {
-                Op::Argument { size, name } => (0..*size)
-                    .map(|i| Gate::argument(name.clone(), i, gates_dedup_cache))
-                    .collect(),
-                Op::Ternary {
-                    condition,
-                    then,
-                    or,
-                } => {
-                    let condition_bit = bitificate_op_rec(condition, op_cache, gates_dedup_cache)
-                        .get(0)
-                        .unwrap()
-                        .clone();
-                    let then = bitificate_op_rec(then, op_cache, gates_dedup_cache)
-                        .iter()
-                        .map(|g| Gate::and(&[g.clone(), condition_bit.clone()], gates_dedup_cache))
-                        .collect_vec();
+#[derive(Default)]
+struct LogicConstantFolding;
+impl Analysis<Logic> for LogicConstantFolding {
+    type Data = Option<bool>;
 
-                    let not_condition_bit = Gate::not(condition_bit, gates_dedup_cache);
-                    let or = bitificate_op_rec(or, op_cache, gates_dedup_cache)
-                        .iter()
-                        .map(|g| {
-                            Gate::and(&[g.clone(), not_condition_bit.clone()], gates_dedup_cache)
-                        })
-                        .collect_vec();
+    fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
+        egg::merge_max(to, from)
+    }
 
-                    let max_len = then.len().max(or.len());
-                    (0..max_len)
-                        .map(|index| {
-                            [&then, &or]
-                                .into_iter()
-                                .filter_map(|it| it.get(index).cloned())
-                                .collect_vec()
-                        })
-                        .map(|gates| Gate::xor(&gates[..], gates_dedup_cache))
-                        .collect()
-                }
-                Op::Constant(value) => (0..32)
-                    .map(|i| ((value >> i) & 1) == 1)
-                    .map(|b| Gate::constant(b, gates_dedup_cache))
-                    .collect(),
-                Op::Index { index, target } => {
-                    let Op::Constant(index) = index.as_ref() else {todo!()};
-                    vec![bitificate_op_rec(target, op_cache, gates_dedup_cache)
-                        .get(*index as usize)
-                        .unwrap()
-                        .clone()]
-                }
-                // Op::IndexRange { from, to, target } => todo!(),
-                Op::Not(arg) => bitificate_op_rec(arg, op_cache, gates_dedup_cache)
-                    .iter()
-                    .map(|g| Gate::not(g.clone(), gates_dedup_cache))
-                    .collect(),
-                Op::Xor(args) => columns_of_gates(args, op_cache, gates_dedup_cache)
-                    .into_iter()
-                    .map(|column| Gate::xor(&column, gates_dedup_cache))
-                    .collect(),
-                Op::Or(args) => columns_of_gates(args, op_cache, gates_dedup_cache)
-                    .into_iter()
-                    .map(|column| Gate::or(&column, gates_dedup_cache))
-                    .collect(),
-                Op::And(args) => columns_of_gates(args, op_cache, gates_dedup_cache)
-                    .into_iter()
-                    .map(|column| Gate::and(&column, gates_dedup_cache))
-                    .collect(),
-                // Op::Multiplication(_, _) => todo!(),
-                // Op::Sum(_, _) => todo!(),
-                Op::RShift { target, distance } => {
-                    let Op::Constant(distance) = distance.as_ref() else {todo!()};
-                    bitificate_op_rec(target, op_cache, gates_dedup_cache)
-                        .iter()
-                        .skip(*distance as usize)
-                        .cloned()
-                        .collect()
-                }
-                Op::Equal(args) => {
-                    let equal_bits = columns_of_gates(args, op_cache, gates_dedup_cache)
-                        .into_iter()
-                        .map(|column| {
-                            assert_eq!(column.len(), 2);
-                            Gate::eq(column[0].clone(), column[1].clone(), gates_dedup_cache)
-                        })
-                        .collect_vec();
-                    vec![Gate::and(&equal_bits, gates_dedup_cache)]
-                }
-                _ => todo!(),
-            };
+    fn make(egraph: &EGraph<Logic, Self>, enode: &Logic) -> Self::Data {
+        let x = |i: &Id| egraph[*i].data;
+        match enode {
+            Logic::Xor(args) => args
+                .iter()
+                .map(|arg| x(arg))
+                .fold_options(false, |acc, arg| acc ^ arg),
+            Logic::And(args) => args
+                .iter()
+                .map(|arg| x(arg))
+                .fold_options(true, |acc, arg| acc & arg),
+            Logic::Not(a) => Some(!x(a)?),
+            Logic::Const(a) => Some(*a),
+            _ => None,
+        }
+    }
 
-            // let gates = gates
-            //     .into_iter()
-            //     .rev()
-            //     .skip_while(|g| g.is_const_false())
-            //     .collect_vec()
-            //     .into_iter()
-            //     .rev()
-            //     .collect_vec();
-
-            let rc_gates = Rc::new(gates);
-            op_cache.insert(op.clone(), rc_gates.clone());
-            rc_gates
+    fn modify(egraph: &mut EGraph<Logic, Self>, id: Id) {
+        if let Some(i) = egraph[id].data {
+            let added = egraph.add(Logic::Const(i));
+            egraph.union(id, added);
         }
     }
 }
 
-pub fn bitificate_op(op: &Rc<Op>) -> Vec<Rc<Gate>> {
-    let mut op_cache = FxHashMap::default();
-    let mut gates_dedup_cache = FxHashSet::default();
-    bitificate_op_rec(op, &mut op_cache, &mut gates_dedup_cache)
-        .iter()
-        .cloned()
-        .collect()
+pub struct XorMinimizerCost;
+
+// impl CostFunction<Logic> for XorMinimizerCost {
+//     type Cost = usize;
+
+//     fn cost<C>(&mut self, enode: &Logic, mut costs: C) -> Self::Cost
+//     where
+//         C: FnMut(Id) -> Self::Cost,
+//     {
+//         match enode {
+//             Logic::Xor(..) => enode.fold(16, |sum, i| sum.saturating_add(costs(i))),
+//             Logic::And(..) => enode.fold(4, |sum, i| sum.saturating_add(costs(i))),
+//             Logic::Not(..) => enode.fold(1, |sum, i| sum.saturating_add(costs(i))),
+//             Logic::Register(..) => enode.fold(0, |sum, i| sum.saturating_add(costs(i))),
+//             Logic::Const(..) => 0,
+//             Logic::Arg(..) => 0,
+//         }
+//     }
+// }
+
+impl LpCostFunction<Logic, LogicConstantFolding> for XorMinimizerCost {
+    fn node_cost(
+        &mut self,
+        egraph: &EGraph<Logic, LogicConstantFolding>,
+        _eclass: Id,
+        enode: &Logic,
+    ) -> f64 {
+        match enode {
+            Logic::Xor(srcs) => {
+                // let a = egraph.id_to_expr(*a);
+                // let b = egraph.id_to_expr(*b);
+
+                // egraph.
+                512.0
+            }
+            Logic::And(..) => 32.0,
+            Logic::Not(..) => 2.0,
+            Logic::Register(..) => 0.1,
+            Logic::Const(..) => 0.1,
+            Logic::Arg(..) => 0.1,
+        }
+    }
+}
+
+pub struct Bitificator {
+    egraph: EGraph<Logic, LogicConstantFolding>,
+    op_expr: RecExpr<Op>,
+    op_cache: FxHashMap<Id, Vec<Id>>,
+}
+
+impl Bitificator {
+    pub fn new(expr: RecExpr<Op>) -> Self {
+        Self {
+            egraph: EGraph::new(LogicConstantFolding),
+            op_expr: expr,
+            op_cache: FxHashMap::default(),
+        }
+    }
+
+    pub fn bitificate(mut self) -> RecExpr<Logic> {
+        let return_ids = self.get_bitificated(Id::from(self.op_expr.as_ref().len() - 1));
+        let return_logic = Logic::Register(return_ids.into_boxed_slice());
+        let return_id = self.egraph.add(return_logic);
+
+        let mut runner = Runner::default()
+            .with_egraph(self.egraph)
+            .with_time_limit(std::time::Duration::from_secs(3600))
+            .with_node_limit(30_000)
+            .with_iter_limit(50);
+        runner.roots.push(return_id);
+
+        runner = runner.run(&make_rules());
+
+        // extract_v2(&runner.egraph, runner.roots[0]);
+
+        let expr = crate::extract::extract(&runner.egraph, runner.roots[0], XorMinimizerCost);
+
+        let xors = expr
+            .as_ref()
+            .iter()
+            .filter(|b| matches!(b, Logic::Xor(..)))
+            .count();
+
+        println!("Simplified to len {}, xors: {}", expr.as_ref().len(), xors);
+
+        let mut gr = EGraph::new(());
+        gr.add_expr(&expr);
+        gr.dot().to_dot("bits.dot").unwrap();
+
+        expr
+    }
+
+    fn get_bitificated(&mut self, id: Id) -> Vec<Id> {
+        match self.op_cache.get(&id) {
+            Some(bits) => bits.clone(),
+            None => {
+                let op = self.op_expr[id].clone();
+                let ids: Vec<_> = match op {
+                    Op::Argument(argument) => (0..(argument.size))
+                        .map(|index| {
+                            Logic::Arg(ArgInfo {
+                                name: argument.name.clone(),
+                                index,
+                            })
+                        })
+                        .map(|l| self.egraph.add(l))
+                        .collect(),
+                    Op::Ternary([cond, then, or]) => {
+                        let cond = self.get_bitificated(cond)[0];
+                        let inv_cond = self.egraph.add(Logic::Not(cond));
+
+                        self.get_bitificated(then)
+                            .into_iter()
+                            .zip_longest(self.get_bitificated(or).into_iter())
+                            .map(|thenor| match thenor {
+                                itertools::EitherOrBoth::Both(then, or) => {
+                                    let then_cond =
+                                        self.egraph.add(Logic::And(Box::new([then, cond])));
+                                    let or_inv_cond =
+                                        self.egraph.add(Logic::And(Box::new([or, inv_cond])));
+                                    self.egraph
+                                        .add(Logic::Xor(Box::new([then_cond, or_inv_cond])))
+                                }
+                                itertools::EitherOrBoth::Left(then) => {
+                                    self.egraph.add(Logic::And(Box::new([then, cond])))
+                                }
+                                itertools::EitherOrBoth::Right(or) => {
+                                    self.egraph.add(Logic::And(Box::new([or, inv_cond])))
+                                }
+                            })
+                            .collect()
+                    }
+                    Op::Constant(value) => (0..32)
+                        .map(|i| ((u32::try_from(value.clone()).unwrap() >> i) & 1) == 1)
+                        .map(Logic::Const)
+                        .map(|l| self.egraph.add(l))
+                        .collect(),
+                    Op::Index([_index, _target]) => todo!(),
+                    Op::IndexRange([_from, _to, _target]) => todo!(),
+                    Op::Not(a) => self
+                        .get_bitificated(a)
+                        .into_iter()
+                        .map(Logic::Not)
+                        .map(|l| self.egraph.add(l))
+                        .collect(),
+                    Op::Xor([a, b]) => self
+                        .get_bitificated(a)
+                        .into_iter()
+                        .zip_longest(self.get_bitificated(b).into_iter())
+                        .map(|ab| match ab {
+                            itertools::EitherOrBoth::Both(a, b) => {
+                                self.egraph.add(Logic::Xor(Box::new([a, b])))
+                            }
+                            itertools::EitherOrBoth::Left(a)
+                            | itertools::EitherOrBoth::Right(a) => a,
+                        })
+                        .collect(),
+                    Op::Or([a, b]) => self
+                        .get_bitificated(a)
+                        .into_iter()
+                        .zip_longest(self.get_bitificated(b).into_iter())
+                        .map(|ab| match ab {
+                            itertools::EitherOrBoth::Both(a, b) => {
+                                let not_a = self.egraph.add(Logic::Not(a));
+                                let not_b = self.egraph.add(Logic::Not(b));
+                                let not_a_not_b =
+                                    self.egraph.add(Logic::And(Box::new([not_a, not_b])));
+                                self.egraph.add(Logic::Not(not_a_not_b))
+                            }
+                            itertools::EitherOrBoth::Left(a)
+                            | itertools::EitherOrBoth::Right(a) => a,
+                        })
+                        .collect(),
+                    Op::And([a, b]) => self
+                        .get_bitificated(a)
+                        .into_iter()
+                        .zip(self.get_bitificated(b))
+                        .map(|(a, b)| Logic::And(Box::new([a, b])))
+                        .map(|l| self.egraph.add(l))
+                        .collect(),
+                    Op::RShift([target, distance]) => {
+                        let Op::Constant(distance) = self.op_expr[distance].clone() else {todo!()};
+                        self.get_bitificated(target)
+                            .into_iter()
+                            .skip(distance.try_into().unwrap())
+                            .collect()
+                    }
+                    // Op::Equal([a, b]) => todo!(),
+                    _ => todo!(),
+                };
+
+                self.op_cache.insert(id, ids.clone());
+                ids
+            }
+        }
+    }
 }

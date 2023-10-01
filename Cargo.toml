@@ -9,10 +9,22 @@ license = "AGPL-3.0-or-later"
 categories = ["compilers", "science"]
 
 [dependencies]
+egg = { version = "0.9.5", features = ["lp"] }
+extraction-gym = { git = "https://github.com/averyanalex/extraction-gym.git", features = [
+    "ilp-cbc",
+] }
+
+egraph-serialize = { git = "https://github.com/egraphs-good/egraph-serialize", rev = "951b829a434f4008c7b45ba4ac0da1037d2da90" }
 itertools = "0.11.0"
 num = "0.4.0"
 rand = "0.8.5"
 rustc-hash = "1.1.0"
+tracing-subscriber = "0.3.17"
+coin_cbc = "0.1.7"
+indexmap = "2.0.0"
+petgraph = "0.6.3"
+log = "0.4.20"
+good_lp = { version = "1.5.0", default-features = false, features = ["highs"] }
 
 # [profile.release]
 # lto = true

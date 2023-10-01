@@ -1,188 +1,400 @@
-use std::rc::Rc;
-
+use egg::{Id, Language, RecExpr};
+use itertools::Itertools;
+use petgraph::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    bitificator::Gate,
-    circuit::{Circuit, Qubit, QubitDesc},
+    bitificator::Logic,
+    circuit::{Circuit, Qubit, QubitDesc, QubitRegister},
 };
 
-fn gen_mcx(
-    mut target: Qubit,
-    args: &FxHashSet<Rc<Gate>>,
-    compiled: &mut FxHashMap<Rc<Gate>, Qubit>,
-    circ: &mut Circuit,
-) -> Qubit {
-    let mut normal_args = Vec::new();
-    let mut inversed_args = Vec::new();
-
-    for arg in args {
-        match arg.as_ref() {
-            Gate::Not(not_arg) => {
-                compile_rec(not_arg, compiled, circ);
-                inversed_args.push(not_arg);
-            }
-            Gate::And(_) => panic!("AND in AND"),
-            _ => {
-                compile_rec(arg, compiled, circ);
-                normal_args.push(arg);
-            }
-        }
-    }
-
-    let mut controls = Vec::new();
-    let mut inversed_controls = Vec::new();
-
-    for inv_arg in inversed_args {
-        let mut ctr = compiled.remove(inv_arg).unwrap();
-        ctr = circ.x(ctr);
-        inversed_controls.push((ctr, inv_arg.clone()));
-    }
-
-    for (ctr, _) in inversed_controls.iter() {
-        controls.push(ctr);
-    }
-
-    for arg in normal_args {
-        let ctr = compiled.get(arg).unwrap();
-        controls.push(ctr);
-    }
-
-    target = circ.mcx(controls, target);
-
-    for (ctr, gate) in inversed_controls {
-        let ctr = circ.x(ctr);
-        compiled.insert(gate, ctr);
-    }
-
-    target
+pub struct Compiler {
+    circuit: Circuit,
+    graph: DiGraph<LogicNode, LogicEdge>,
+    root_node: NodeIndex,
 }
 
-fn optimal_xor_alloc_cost(mut variants: Vec<&Rc<Gate>>) -> Rc<Gate> {
-    variants.sort_by_key(|v| v.cost());
-    variants.reverse();
-    variants.pop().unwrap().clone()
-}
+impl Compiler {
+    pub fn new(logic: &RecExpr<Logic>, args: Vec<(String, u32)>) -> Self {
+        let mut circuit = Circuit::new(args.clone());
+        let mut graph = Graph::new();
+        let mut node_ids = FxHashMap::default();
 
-fn compile_rec(
-    gate: &Rc<Gate>,
-    // parent: Option<Rc<Gate>>,
-    compiled: &mut FxHashMap<Rc<Gate>, Qubit>,
-    // parents: &mut FxHashMap<Rc<Gate>, FxHashSet<Rc<Gate>>>,
-    circ: &mut Circuit,
-) {
-    if !compiled.contains_key(gate) {
-        let qubit = match gate.as_ref() {
-            Gate::Argument { name: _, index: _ } => circ.get_free_qubit(),
-            Gate::Constant(val) => {
-                let q = circ.get_free_qubit();
-                if *val {
-                    circ.x(q)
+        let mut root = None;
+
+        let args_qubits: FxHashMap<_, _> = args
+            .iter()
+            .map(|(name, len)| {
+                let qubits = (0..(*len))
+                    .map(|i| {
+                        let q = circuit.get_ancilla_qubit();
+                        circuit.add_qubit_description(
+                            q,
+                            QubitDesc {
+                                reg: QubitRegister::Argument(name.clone()),
+                                index: i,
+                            },
+                        );
+                        q
+                    })
+                    .collect_vec();
+                (name.clone(), qubits)
+            })
+            .collect();
+
+        for (parent_id, parent) in logic.as_ref().iter().enumerate() {
+            let kind = match parent {
+                Logic::Xor(_) => LogicNodeKind::Xor,
+                Logic::And(_) => LogicNodeKind::And,
+                Logic::Not(_) => LogicNodeKind::Not,
+                Logic::Register(_) => LogicNodeKind::Register,
+                Logic::Const(value) => LogicNodeKind::Constant(*value),
+                Logic::Arg(_) => LogicNodeKind::Arg,
+            };
+            let graph_parent_id = graph.add_node(LogicNode {
+                kind,
+                qubit: if let Logic::Arg(arg) = parent {
+                    Some(args_qubits[&arg.name][arg.index as usize])
                 } else {
-                    q
-                }
-            }
-            Gate::Not(arg) => {
-                compile_rec(arg, compiled, circ);
-                let q = compiled.remove(arg).unwrap();
-                circ.x(q)
-            }
-            Gate::And(args) => {
-                let q = circ.get_free_qubit();
-                gen_mcx(q, args, compiled, circ)
-            }
-            Gate::Xor(args) => {
-                let mut already_compiled = Vec::new();
-                let mut not_yet_compiled = Vec::new();
-
-                for arg in args {
-                    if compiled.get(arg).is_some() {
-                        already_compiled.push(arg)
-                    } else {
-                        not_yet_compiled.push(arg)
-                    }
-                }
-
-                let mut q = match already_compiled.pop() {
-                    Some(comp) => compiled.remove(comp).unwrap(),
-                    None => {
-                        let best = optimal_xor_alloc_cost(not_yet_compiled.clone());
-                        let best_pos = not_yet_compiled.iter().position(|a| **a == best).unwrap();
-                        let not_comp = not_yet_compiled.swap_remove(best_pos);
-
-                        compile_rec(not_comp, compiled, circ);
-                        compiled.remove(not_comp).unwrap()
-                    }
-                };
-
-                for comp in already_compiled {
-                    let ctr = compiled.get(comp).unwrap();
-                    q = circ.cx(ctr, q);
-                }
-
-                for not_comp in not_yet_compiled {
-                    match not_comp.as_ref() {
-                        Gate::Constant(_) | Gate::Xor(_) | Gate::Not(_) => {
-                            panic!("this in XOR isn't possible")
-                        }
-                        Gate::And(args) => {
-                            q = gen_mcx(q, args, compiled, circ);
-                        }
-                        Gate::Argument { .. } => {
-                            // todo!("{:?}", not_comp);
-                            compile_rec(not_comp, compiled, circ);
-                            let arg = compiled.get(not_comp).unwrap();
-                            q = circ.cx(arg, q);
-                        }
-                    }
-                }
-
-                q
-            }
-        };
-        compiled.insert(gate.clone(), qubit);
-    }
-}
-
-pub fn compile(
-    logic: Vec<Rc<Gate>>,
-    args: Vec<(String, u32)>,
-    mut parents: FxHashMap<Rc<Gate>, FxHashSet<Rc<Gate>>>,
-) -> Circuit {
-    let mut circuit = Circuit::new(args.clone());
-    let mut compiled = FxHashMap::default();
-
-    for (name, size) in &args {
-        for i in 0..*size {
-            let arg_qubit = circuit.get_free_qubit();
-            circuit.set_qubit_desc(
-                &arg_qubit,
-                QubitDesc {
-                    reg: crate::circuit::QubitRegister::Argument(name.clone()),
-                    index: i,
+                    None
                 },
-            );
-            compiled.insert(
-                Rc::new(Gate::Argument {
-                    name: name.clone(),
-                    index: i,
-                }),
-                arg_qubit,
-            );
+            });
+            if parent_id == logic.as_ref().len() - 1 {
+                root = Some(graph_parent_id);
+            }
+            node_ids.insert(Id::from(parent_id), graph_parent_id);
+            for child in parent.children() {
+                graph.add_edge(node_ids[child], graph_parent_id, LogicEdge { done: false });
+            }
+        }
+
+        Self {
+            circuit,
+            graph,
+            root_node: root.unwrap(),
         }
     }
 
-    for (index, gate) in logic.iter().enumerate() {
-        compile_rec(gate, &mut compiled, &mut circuit);
-        let res_q = compiled.remove(gate).unwrap();
-        circuit.set_qubit_desc(
-            &res_q,
-            QubitDesc {
-                reg: crate::circuit::QubitRegister::Result,
-                index: index as u32,
-            },
-        );
+    /// Count undone outgoing edges
+    fn count_undone_dependents(&self, node: NodeIndex) -> usize {
+        self.graph
+            .edges_directed(node, Direction::Outgoing)
+            .filter(|edge| !edge.weight().done)
+            .count()
     }
 
-    circuit
+    /// Check if we can use node as dependency
+    fn is_node_available(&self, node_id: NodeIndex) -> bool {
+        let node = &self.graph[node_id];
+
+        (node.qubit.is_some()
+            && self
+                .graph
+                .edges_directed(node_id, Direction::Incoming)
+                .all(|e| e.weight().done))
+            || match node.kind {
+                LogicNodeKind::Xor | LogicNodeKind::Arg => false, // only can use XOR/Arg if qubit.is_some()
+                LogicNodeKind::Constant(_) => false, // there should be no gates dependent on constants
+                LogicNodeKind::Register | LogicNodeKind::And | LogicNodeKind::Not => self
+                    .graph
+                    .neighbors_directed(node_id, Direction::Incoming)
+                    .all(|src_id| self.is_node_available(src_id)),
+            }
+    }
+
+    /// Recursively make edge done
+    fn make_edge_done(&mut self, edge: EdgeIndex) {
+        if self.graph[edge].done {
+            return;
+        }
+
+        self.graph[edge].done = true;
+        let (source, target) = self.graph.edge_endpoints(edge).unwrap();
+
+        if self.graph[target].kind == LogicNodeKind::And {
+            let edges = self
+                .graph
+                .edges_directed(target, Direction::Incoming)
+                .map(|edge| edge.id())
+                .collect_vec();
+
+            for edge in edges {
+                self.make_edge_done(edge);
+            }
+        }
+
+        if self.count_undone_dependents(source) == 0 {
+            let edges = self
+                .graph
+                .edges_directed(source, Direction::Incoming)
+                .map(|edge| edge.id())
+                .collect_vec();
+
+            for edge in edges {
+                self.make_edge_done(edge);
+            }
+        }
+    }
+
+    fn construct_mcx(&mut self, and: NodeIndex, target: Qubit) {
+        let mut mcx_sources = FxHashSet::default();
+
+        fn collect_sources_of_and(
+            and: NodeIndex,
+            graph: &DiGraph<LogicNode, LogicEdge>,
+            mcx_sources: &mut FxHashSet<(Qubit, bool)>,
+        ) {
+            for source in graph.neighbors_directed(and, Direction::Incoming) {
+                if let Some(source_qubit) = graph[source].qubit {
+                    mcx_sources.insert((source_qubit, false));
+                } else {
+                    match graph[source].kind {
+                        LogicNodeKind::And => collect_sources_of_and(and, graph, mcx_sources),
+                        LogicNodeKind::Not => {
+                            let arg_of_not = graph
+                                .neighbors_directed(source, Direction::Incoming)
+                                .next()
+                                .unwrap();
+
+                            assert_ne!(graph[arg_of_not].kind, LogicNodeKind::Not);
+
+                            mcx_sources.insert((graph[arg_of_not].qubit.unwrap(), true));
+                        }
+                        LogicNodeKind::Arg
+                        | LogicNodeKind::Xor
+                        | LogicNodeKind::Register
+                        | LogicNodeKind::Constant(_) => unreachable!(),
+                    }
+                }
+            }
+        }
+
+        collect_sources_of_and(and, &self.graph, &mut mcx_sources);
+
+        // dbg!(&mcx_sources);
+
+        self.circuit.mcx(mcx_sources, target);
+    }
+
+    fn execute_edge(&mut self, edge: EdgeIndex, target_qubit: Qubit) {
+        let (source, target) = self.graph.edge_endpoints(edge).unwrap();
+
+        match self.graph[target].kind {
+            LogicNodeKind::Xor => {
+                if let Some(source_qubit) = self.graph[source].qubit {
+                    self.circuit.cx(source_qubit, false, target_qubit);
+                } else {
+                    match self.graph[source].kind {
+                        LogicNodeKind::Not => {
+                            let arg_of_not = self
+                                .graph
+                                .neighbors_directed(source, Direction::Incoming)
+                                .next()
+                                .unwrap();
+
+                            assert_ne!(self.graph[arg_of_not].kind, LogicNodeKind::Not);
+
+                            if let Some(arg_of_not_qubit) = self.graph[arg_of_not].qubit {
+                                self.circuit.cx(arg_of_not_qubit, true, target_qubit);
+                            } else {
+                                match self.graph[arg_of_not].kind {
+                                    LogicNodeKind::And => {
+                                        self.construct_mcx(arg_of_not, target_qubit);
+                                        self.circuit.x(target_qubit);
+                                    }
+                                    LogicNodeKind::Xor
+                                    | LogicNodeKind::Arg
+                                    | LogicNodeKind::Constant(_)
+                                    | LogicNodeKind::Not
+                                    | LogicNodeKind::Register => unreachable!(),
+                                }
+                            }
+                        }
+                        LogicNodeKind::And => {
+                            self.construct_mcx(source, target_qubit);
+                        }
+                        LogicNodeKind::Xor
+                        | LogicNodeKind::Arg
+                        | LogicNodeKind::Constant(..)
+                        | LogicNodeKind::Register => {
+                            unreachable!()
+                        }
+                    }
+                }
+            }
+            LogicNodeKind::And => {
+                self.construct_mcx(target, target_qubit);
+            }
+            LogicNodeKind::Not => {
+                self.circuit
+                    .cx(self.graph[source].qubit.unwrap(), true, target_qubit);
+            }
+            LogicNodeKind::Arg => todo!(),
+            LogicNodeKind::Register => todo!(),
+            LogicNodeKind::Constant(_) => todo!(),
+        }
+    }
+
+    pub fn compile(mut self) -> Circuit {
+        let mut allocs = 0u32;
+        let mut optimal = 0u32;
+
+        for node in self.graph.node_weights_mut() {
+            if let LogicNodeKind::Constant(value) = node.kind {
+                let q = self.circuit.get_ancilla_qubit();
+                if value {
+                    self.circuit.x(q);
+                }
+                node.qubit = Some(q);
+            }
+        }
+
+        while !self
+            .graph
+            .neighbors_directed(self.root_node, Direction::Incoming)
+            .all(|node| {
+                self.graph[node].qubit.is_some()
+                    && self
+                        .graph
+                        .edges_directed(node, Direction::Incoming)
+                        .all(|e| e.weight().done)
+            })
+        {
+            // collect vector with available, undone edges
+            let available_edges = self
+                .graph
+                .edge_references()
+                .filter(|edge| !edge.weight().done) // skip already done edges
+                .filter(|edge| {
+                    match self.graph[edge.target()].kind {
+                        LogicNodeKind::Xor | LogicNodeKind::Not | LogicNodeKind::Register => self.is_node_available(edge.source()),
+                        LogicNodeKind::And => self.graph.neighbors_directed(edge.target(), Direction::Incoming).all(|n| self.is_node_available(n)),
+                        LogicNodeKind::Arg | LogicNodeKind::Constant(_) => unreachable!(),
+                    }
+        }) // only edges available to process
+                .filter(|edge| {
+                    self.graph
+                        .neighbors_directed(edge.target(), Direction::Outgoing)
+                        .any(|trg| self.graph[trg].kind == LogicNodeKind::Register) // need all nodes used in register
+                        || match self.graph[edge.target()].kind {
+                            LogicNodeKind::Xor | LogicNodeKind::Register => true, // construct XORs and registers always
+                            LogicNodeKind::Arg | LogicNodeKind::Constant(..) => unreachable!(), // there can't be edges to arg/const
+                            LogicNodeKind::Not => false, // can use inversed control in QASM
+                            LogicNodeKind::And => self // "a" needed only if there is AND(NOT(a), ...)
+                                .graph
+                                .edges_directed(edge.target(), Direction::Outgoing)
+                                .any(|a_dependent| {
+                                    !a_dependent.weight().done &&
+                                    self.graph[a_dependent.target()].kind == LogicNodeKind::Not
+                                        && self
+                                            .graph
+                                            .edges_directed(a_dependent.target(), Direction::Outgoing)
+                                            .any(|not_dependent| !not_dependent.weight().done
+                                                && self.graph[not_dependent.target()].kind == LogicNodeKind::And)
+                                }),
+                        }
+                })
+                .map(|edge| edge.id())
+                .collect_vec();
+
+            let mut did_something_optimal = false;
+
+            for edge in &available_edges {
+                let (source, target) = self.graph.edge_endpoints(*edge).unwrap();
+
+                if let Some(target_qubit) = self.graph[target].qubit {
+                    assert_eq!(self.graph[target].kind, LogicNodeKind::Xor);
+
+                    self.execute_edge(*edge, target_qubit);
+                    self.make_edge_done(*edge);
+
+                    did_something_optimal = true;
+                    optimal += 1;
+                } else if self.count_undone_dependents(source) == 1
+                && self.graph[target].kind == LogicNodeKind::Xor && let Some(source_qubit) = self.graph[source].qubit
+                {
+                    assert!(self.graph[target].qubit.is_none());
+
+                    self.graph[target].qubit = Some(source_qubit);
+                    self.graph[source].qubit = None;
+
+                    self.make_edge_done(*edge);
+
+                    did_something_optimal = true;
+                    optimal += 1;
+                } else if self.count_undone_dependents(source) == 1
+                && self.graph[target].kind == LogicNodeKind::Not && let Some(source_qubit) = self.graph[source].qubit
+                {
+                    assert!(self.graph[target].qubit.is_none());
+
+                    self.graph[target].qubit = Some(source_qubit);
+                    self.graph[source].qubit = None;
+
+                    self.circuit.x(source_qubit);
+
+                    self.make_edge_done(*edge);
+
+                    did_something_optimal = true;
+                    optimal += 1;
+                }
+            }
+
+            if !did_something_optimal {
+                let Some(edge) = available_edges.first() else {panic!("can't compile")};
+                let (_, target) = self.graph.edge_endpoints(*edge).unwrap();
+
+                assert!(self.graph[target].qubit.is_none()); // unoptimal => allocation
+                let target_qubit = self.circuit.get_ancilla_qubit();
+
+                self.execute_edge(*edge, target_qubit);
+                self.make_edge_done(*edge);
+
+                self.graph[target].qubit = Some(target_qubit);
+
+                allocs += 1;
+            }
+        }
+
+        for (idx, node) in self
+            .graph
+            .neighbors_directed(self.root_node, Direction::Incoming)
+            .collect_vec()
+            .into_iter()
+            .rev()
+            .enumerate()
+        {
+            self.circuit.add_qubit_description(
+                self.graph[node].qubit.unwrap(),
+                QubitDesc {
+                    reg: QubitRegister::Result,
+                    index: idx as u32,
+                },
+            )
+        }
+
+        println!("Allocs: {allocs}, optimal: {optimal}");
+
+        self.circuit
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LogicNodeKind {
+    Xor,
+    And,
+    Not,
+    Arg,
+    Register,
+    Constant(bool),
+}
+
+#[derive(Debug)]
+struct LogicNode {
+    qubit: Option<Qubit>,
+    kind: LogicNodeKind,
+}
+
+#[derive(Debug)]
+struct LogicEdge {
+    done: bool,
 }

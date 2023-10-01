@@ -1,199 +1,204 @@
-use std::rc::Rc;
+use std::{fmt::Display, str::FromStr};
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use egg::*;
+
+use num::BigUint;
+use rustc_hash::FxHashMap;
 
 use crate::frontend::Ast;
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum Op {
-    Argument {
-        size: u32,
-        name: String,
-    },
-    Ternary {
-        condition: Rc<Self>,
-        then: Rc<Self>,
-        or: Rc<Self>,
-    },
-    Constant(u32),
-    Index {
-        index: Rc<Self>,
-        target: Rc<Self>,
-    },
-    IndexRange {
-        from: Rc<Self>,
-        to: Rc<Self>,
-        target: Rc<Self>,
-    },
-    Not(Rc<Self>),
-    Xor(FxHashSet<Rc<Self>>),
-    Or(FxHashSet<Rc<Self>>),
-    And(FxHashSet<Rc<Self>>),
-    // Multiplication(Rc<Self>, Rc<Self>),
-    // Sum(Rc<Self>, Rc<Self>),
-    RShift {
-        target: Rc<Self>,
-        distance: Rc<Self>,
-    },
-    Equal(FxHashSet<Rc<Self>>),
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ArgumentInfo {
+    pub size: u32,
+    pub name: String,
 }
 
-impl std::hash::Hash for Op {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // Derived hash is too expensive
-        let id = match self {
-            Op::Argument { .. } => 0,
-            Op::Ternary {
-                condition: _,
-                then: _,
-                or: _,
-            } => 1,
-            Op::Constant(_) => 2,
-            Op::Index {
-                index: _,
-                target: _,
-            } => 3,
-            Op::IndexRange {
-                from: _,
-                to: _,
-                target: _,
-            } => 4,
-            Op::Not(_) => 5,
-            Op::Xor(_) => 6,
-            Op::Or(_) => 7,
-            Op::And(_) => 8,
-            Op::RShift {
-                target: _,
-                distance: _,
-            } => 9,
-            Op::Equal(_) => 10,
-        };
-        state.write_u8(id);
+impl Display for ArgumentInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}({})", self.name, self.size)
     }
 }
 
-fn unwrap_op(
-    vars: &FxHashMap<String, Rc<Op>>,
-    dedup_cache: &mut FxHashSet<Rc<Op>>,
-    ast_cache: &mut FxHashMap<Ast, Rc<Op>>,
-    ast: &Ast,
-) -> Rc<Op> {
-    let op = match ast_cache.get(ast) {
-        Some(op) => {
-            return op.clone();
+impl FromStr for ArgumentInfo {
+    type Err = ();
+
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        Err(())
+    }
+}
+
+define_language! {
+    pub enum Op {
+        "!" = Not(Id),
+        "^" = Xor([Id; 2]),
+        "|" = Or([Id; 2]),
+        "&" = And([Id; 2]),
+        ">>" = RShift([Id; 2]),
+        "<<" = LShift([Id; 2]),
+        "+" = Add([Id; 2]),
+        "-" = Sub([Id; 2]),
+        "*" = Mul([Id; 2]),
+        "/" = Div([Id; 2]),
+        "==" = Eq([Id; 2]),
+        "?" = Ternary([Id; 3]),
+        "i" = Index([Id; 2]),
+        "ir" = IndexRange([Id; 3]),
+        Constant(BigUint),
+        Argument(ArgumentInfo),
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct AnalyzerData {
+    value: Option<BigUint>,
+}
+
+#[derive(Default)]
+struct OpAnalyzer;
+impl Analysis<Op> for OpAnalyzer {
+    type Data = AnalyzerData;
+
+    fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
+        egg::merge_max(to, from)
+    }
+
+    fn make(egraph: &EGraph<Op, Self>, enode: &Op) -> Self::Data {
+        let make_value = || {
+            let x = |i: &Id| egraph[*i].data.value.clone();
+            match enode {
+                Op::Xor([a, b]) => Some(x(a)? ^ x(b)?),
+                Op::Or([a, b]) => Some(x(a)? | x(b)?),
+                Op::And([a, b]) => Some(x(a)? & x(b)?),
+                Op::RShift([target, distance]) => {
+                    Some(x(target)? >> u128::try_from(x(distance)?).unwrap())
+                }
+                _ => None,
+            }
+        };
+
+        let value = make_value();
+
+        Self::Data { value }
+    }
+
+    fn modify(egraph: &mut EGraph<Op, Self>, id: Id) {
+        if let Some(i) = &egraph[id].data.value {
+            let added = egraph.add(Op::Constant(i.clone()));
+            egraph.union(id, added);
         }
-        None => match ast {
-            Ast::Variable(variable) => return vars[variable].clone(),
-            Ast::Xor(args) => Op::Xor(
-                args.iter()
-                    .map(|arg| unwrap_op(vars, dedup_cache, ast_cache, arg))
-                    .collect(),
-            ),
-            Ast::Or(args) => Op::Or(
-                args.iter()
-                    .map(|arg| unwrap_op(vars, dedup_cache, ast_cache, arg))
-                    .collect(),
-            ),
-            Ast::And(args) => Op::And(
-                args.iter()
-                    .map(|arg| unwrap_op(vars, dedup_cache, ast_cache, arg))
-                    .collect(),
-            ),
-            Ast::Not(arg) => Op::Not(unwrap_op(vars, dedup_cache, ast_cache, arg)),
+    }
+}
+
+fn make_rules() -> Vec<Rewrite<Op, OpAnalyzer>> {
+    use egg::rewrite as rw;
+    vec![
+        // Commutable
+        rw!("comm-xor"; "(^ ?a ?b)" => "(^ ?b ?a)"),
+        rw!("comm-and"; "(& ?a ?b)" => "(& ?b ?a)"),
+        // Associative
+        rw!("assoc-xor"; "(^ ?a (^ ?b ?c))" => "(^ (^ ?a ?b) ?c)"),
+        rw!("assoc-and"; "(& ?a (& ?b ?c))" => "(& (& ?a ?b) ?c)"),
+        // Same elements logic
+        rw!("and-same"; "(& ?a ?a)" => "?a"),
+        rw!("and-same-not"; "(& (! ?a) ?a)" => "0"),
+        rw!("xor-same"; "(^ ?a ?a)" => "0"),
+        // Etc
+        rw!("cancel-not"; "(! (! ?a))" => "?a"),
+        rw!("xor-not-not-xor"; "(^ (! ?a) ?b)" => "(! (^ ?a ?b))"),
+        rw!("cancel-xor-not-not"; "(^ (! ?a) (! ?b))" => "(^ ?a ?b)"),
+        rw!("not-xor-xor-not"; "(! (^ ?a ?b))" => "(^ (! ?a) ?b)"),
+    ]
+}
+
+pub struct Unwrapper {
+    variables: FxHashMap<String, Id>,
+    egraph: EGraph<Op, OpAnalyzer>,
+}
+
+impl Unwrapper {
+    pub fn new() -> Self {
+        Self {
+            variables: FxHashMap::default(),
+            egraph: EGraph::new(OpAnalyzer),
+        }
+    }
+
+    pub fn unwrap_ast(&mut self, ast: &Ast) -> Id {
+        let op = match ast {
+            Ast::Variable(name) => return self.variables[name],
+            Ast::Xor(a, b) => Op::Xor([self.unwrap_ast(a), self.unwrap_ast(b)]),
+            Ast::Or(a, b) => Op::Or([self.unwrap_ast(a), self.unwrap_ast(b)]),
+            Ast::And(a, b) => Op::And([self.unwrap_ast(a), self.unwrap_ast(b)]),
             Ast::Ternary {
                 condition,
                 then,
                 or,
-            } => Op::Ternary {
-                condition: unwrap_op(vars, dedup_cache, ast_cache, condition),
-                then: unwrap_op(vars, dedup_cache, ast_cache, then),
-                or: unwrap_op(vars, dedup_cache, ast_cache, or),
-            },
-            Ast::Index { index, target } => Op::Index {
-                index: unwrap_op(vars, dedup_cache, ast_cache, index),
-                target: unwrap_op(vars, dedup_cache, ast_cache, target),
-            },
-            Ast::IndexRange { from, to, target } => Op::IndexRange {
-                from: unwrap_op(vars, dedup_cache, ast_cache, from),
-                to: unwrap_op(vars, dedup_cache, ast_cache, to),
-                target: unwrap_op(vars, dedup_cache, ast_cache, target),
-            },
-            Ast::Constant(value) => Op::Constant(*value),
-            Ast::RShift { target, distance } => Op::RShift {
-                target: unwrap_op(vars, dedup_cache, ast_cache, target),
-                distance: unwrap_op(vars, dedup_cache, ast_cache, distance),
-            },
-            Ast::Equal(args) => Op::Equal(
-                args.iter()
-                    .map(|arg| unwrap_op(vars, dedup_cache, ast_cache, arg))
-                    .collect(),
-            ),
+            } => Op::Ternary([
+                self.unwrap_ast(condition),
+                self.unwrap_ast(then),
+                self.unwrap_ast(or),
+            ]),
+            Ast::RShift { target, distance } => {
+                Op::RShift([self.unwrap_ast(target), self.unwrap_ast(distance)])
+            }
+            Ast::Constant(value) => Op::Constant(value.clone()),
             _ => todo!("{:?}", ast),
-        },
-    };
+        };
 
-    let op = match dedup_cache.get(&op) {
-        Some(op) => op.clone(),
-        None => {
-            let op = Rc::new(op);
-            dedup_cache.insert(op.clone());
-            op
-        }
-    };
-    ast_cache.insert(ast.clone(), op.clone());
+        self.egraph.add(op)
+    }
 
-    op
-}
-
-fn unwrap_instructions(
-    instructions: Vec<Ast>,
-    vars: &mut FxHashMap<String, Rc<Op>>,
-    dedup_cache: &mut FxHashSet<Rc<Op>>,
-    ast_cache: &mut FxHashMap<Ast, Rc<Op>>,
-) -> Option<Rc<Op>> {
-    for inst in instructions {
-        match inst {
-            Ast::Assignment { variable, value } => {
-                let op = unwrap_op(vars, dedup_cache, ast_cache, &value);
-                vars.insert(variable, op);
-                ast_cache.clear();
-            }
-            Ast::Return(value) => return Some(unwrap_op(vars, dedup_cache, ast_cache, &value)),
-            Ast::StaticForLoop {
-                variable,
-                values,
-                instructions,
-            } => {
-                for value in values {
-                    vars.insert(
-                        variable.clone(),
-                        unwrap_op(vars, dedup_cache, ast_cache, &value),
-                    );
-                    ast_cache.clear();
-                    if let Some(ret) =
-                        unwrap_instructions(instructions.clone(), vars, dedup_cache, ast_cache)
-                    {
-                        return Some(ret);
-                    };
+    pub fn unwrap_instructions(&mut self, instructions: Vec<Ast>) -> Option<Id> {
+        for inst in instructions {
+            match inst {
+                Ast::Assignment { variable, value } => {
+                    let id = self.unwrap_ast(&value);
+                    self.variables.insert(variable, id);
                 }
+                Ast::Return(value) => return Some(self.unwrap_ast(&value)),
+                Ast::StaticForLoop {
+                    variable,
+                    values,
+                    instructions,
+                } => {
+                    for value in values {
+                        let id = self.unwrap_ast(&value);
+                        self.variables.insert(variable.clone(), id);
+                        if let Some(ret) = self.unwrap_instructions(instructions.clone()) {
+                            return Some(ret);
+                        };
+                    }
+                }
+                _ => panic!(),
             }
-            _ => panic!(),
         }
+
+        None
     }
 
-    None
-}
+    pub fn unwrap(mut self, ast: Ast) -> RecExpr<Op> {
+        let Ast::Function { arguments, instructions, .. } = ast else {todo!()};
 
-pub fn unwrap_func(ast: Ast) -> Rc<Op> {
-    let Ast::Function { name: _, arguments, instructions } = ast else {todo!()};
+        for (name, size) in arguments {
+            let var = Op::Argument(ArgumentInfo {
+                size,
+                name: name.clone(),
+            });
+            let id = self.egraph.add(var);
+            self.variables.insert(name, id);
+        }
 
-    let mut vars = FxHashMap::default();
-    for (name, size) in arguments {
-        vars.insert(name.clone(), Rc::new(Op::Argument { name, size }));
+        let root = self.unwrap_instructions(instructions).unwrap();
+
+        let mut runner = Runner::default()
+            .with_egraph(self.egraph)
+            .with_time_limit(std::time::Duration::from_secs(3600))
+            .with_node_limit(100_000)
+            .with_iter_limit(50);
+        runner.roots.push(root);
+
+        runner = runner.run(&make_rules());
+
+        crate::extract::extract(&runner.egraph, runner.roots[0], AstSize)
     }
-
-    let mut dedup_cache = FxHashSet::default();
-    let mut ast_cache = FxHashMap::default();
-
-    unwrap_instructions(instructions, &mut vars, &mut dedup_cache, &mut ast_cache).unwrap()
 }

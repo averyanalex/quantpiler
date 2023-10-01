@@ -1,3 +1,5 @@
+use num::BigUint;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[allow(dead_code)]
 pub enum Ast {
@@ -7,7 +9,7 @@ pub enum Ast {
         instructions: Vec<Self>,
     },
     Variable(String),
-    Constant(u32),
+    Constant(BigUint),
     Assignment {
         variable: String,
         value: Box<Self>,
@@ -31,10 +33,10 @@ pub enum Ast {
         values: Vec<Self>,
         instructions: Vec<Self>,
     },
-    Equal(Vec<Self>),
-    Xor(Vec<Self>),
-    Or(Vec<Self>),
-    And(Vec<Self>),
+    Equal(Box<Self>, Box<Self>),
+    Xor(Box<Self>, Box<Self>),
+    Or(Box<Self>, Box<Self>),
+    And(Box<Self>, Box<Self>),
     Not(Box<Self>),
     Return(Box<Self>),
     RShift {
@@ -62,16 +64,16 @@ impl Ast {
         }
     }
 
-    pub fn constant(value: u32) -> Self {
+    pub fn constant(value: BigUint) -> Self {
         Self::Constant(value)
     }
 
-    pub fn and(values: Vec<Self>) -> Self {
-        Self::And(values)
+    pub fn and(a: Self, b: Self) -> Self {
+        Self::And(Box::new(a), Box::new(b))
     }
 
-    pub fn xor(values: Vec<Self>) -> Self {
-        Self::Xor(values)
+    pub fn xor(a: Self, b: Self) -> Self {
+        Self::Xor(Box::new(a), Box::new(b))
     }
 
     pub fn variable(name: &str) -> Self {
@@ -107,8 +109,8 @@ pub fn parse() -> Ast {
         "crc32",
         vec![("a", 8), ("b", 8), ("c", 8), ("d", 8)],
         vec![
-            Ast::assign("poly", Ast::constant(0xEDB88320)),
-            Ast::assign("value", Ast::constant(0xFFFFFFFF)),
+            Ast::assign("poly", Ast::constant(0xEDB88320u32.into())),
+            Ast::assign("value", Ast::constant(0xFFFFFFFFu32.into())),
             Ast::static_for_loop(
                 "st",
                 ["a", "b", "c", "d"]
@@ -118,46 +120,48 @@ pub fn parse() -> Ast {
                 vec![
                     Ast::assign(
                         "ch",
-                        Ast::and(vec![
-                            Ast::xor(vec![Ast::variable("st"), Ast::variable("value")]),
-                            Ast::constant(0xFF),
-                        ]),
+                        Ast::and(
+                            Ast::xor(Ast::variable("st"), Ast::variable("value")),
+                            Ast::constant(0xFFu32.into()),
+                        ),
                     ),
-                    Ast::assign("table", Ast::constant(0)),
+                    Ast::assign("table", Ast::constant(0u32.into())),
                     Ast::static_for_loop(
                         "bit",
-                        (0..8).map(Ast::constant).collect(),
+                        (0u32..8).map(|i| Ast::constant(i.into())).collect(),
                         vec![
                             Ast::assign(
                                 "table",
                                 Ast::ternary(
-                                    Ast::and(vec![
-                                        Ast::xor(vec![Ast::variable("ch"), Ast::variable("table")]),
-                                        Ast::constant(1),
-                                    ]),
-                                    Ast::xor(vec![
-                                        Ast::rshift(Ast::variable("table"), Ast::constant(1)),
+                                    Ast::and(
+                                        Ast::xor(Ast::variable("ch"), Ast::variable("table")),
+                                        Ast::constant(1u32.into()),
+                                    ),
+                                    Ast::xor(
+                                        Ast::rshift(
+                                            Ast::variable("table"),
+                                            Ast::constant(1u32.into()),
+                                        ),
                                         Ast::variable("poly"),
-                                    ]),
-                                    Ast::rshift(Ast::variable("table"), Ast::constant(1)),
+                                    ),
+                                    Ast::rshift(Ast::variable("table"), Ast::constant(1u32.into())),
                                 ),
                             ),
-                            Ast::assign("ch", Ast::rshift(Ast::variable("ch"), Ast::constant(1))),
+                            Ast::assign(
+                                "ch",
+                                Ast::rshift(Ast::variable("ch"), Ast::constant(1u32.into())),
+                            ),
                         ],
                     ),
                     Ast::assign(
                         "value",
-                        Ast::xor(vec![
+                        Ast::xor(
                             Ast::variable("table"),
-                            Ast::rshift(Ast::variable("value"), Ast::constant(8)),
-                        ]),
+                            Ast::rshift(Ast::variable("value"), Ast::constant(8u32.into())),
+                        ),
                     ),
                 ],
             ),
-            // Ast::Return(Box::new(Ast::Equal(vec![
-            //     Ast::variable("value"),
-            //     Ast::constant(0x0),
-            // ]))),
             Ast::Return(Box::new(Ast::variable("value"))),
         ],
     )
