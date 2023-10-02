@@ -11,8 +11,8 @@ pub struct GateX {
 impl GateX {
     pub fn format_qasm(
         &self,
-        f: &mut std::fmt::Formatter<'_>,
-        map: &FxHashMap<u32, QubitDesc>,
+        _f: &mut std::fmt::Formatter<'_>,
+        _map: &FxHashMap<u32, QubitDesc>,
     ) -> std::fmt::Result {
         Ok(())
         // match self {
@@ -74,25 +74,15 @@ impl Display for QubitDesc {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Circuit {
     pub qubits_count: u32,
     // free_ancillas: Vec<Qubit>,
     pub gates: Vec<GateX>,
     qubits_map: FxHashMap<Qubit, FxHashSet<QubitDesc>>,
-    arguments: Vec<(String, u32)>,
 }
 
 impl Circuit {
-    pub fn new(args: Vec<(String, u32)>) -> Self {
-        Self {
-            qubits_count: 0,
-            gates: Vec::new(),
-            qubits_map: FxHashMap::default(),
-            arguments: args,
-        }
-    }
-
     pub fn add_qubit_description(&mut self, qubit: Qubit, description: QubitDesc) {
         self.qubits_map
             .entry(qubit)
@@ -138,6 +128,8 @@ impl Circuit {
     pub fn execute(&self, args: &FxHashMap<String, Vec<bool>>) -> Vec<bool> {
         let mut qubits = FxHashMap::default();
 
+        // dbg!(&self.qubits_map);
+
         // let qubit_map = self.fill_qubit_map();
         for (qubit, values) in &self.qubits_map {
             for value in values {
@@ -147,11 +139,15 @@ impl Circuit {
             }
         }
 
+        // dbg!(&qubits);
+        // dbg!(qubits.len());
+
         for gate in &self.gates {
             qubits.insert(
                 gate.target,
                 qubits.get(&gate.target).unwrap_or(&false)
                     ^ gate.controls.iter().fold(true, |acc, (qubit, inverted)| {
+                        // dbg!(&qubit);
                         acc & (qubits[qubit] ^ inverted)
                     }),
             );

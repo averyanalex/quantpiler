@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
-use crate::unwrapper::Op;
+use crate::builder::Op;
 
 define_language! {
     pub enum Logic {
@@ -43,7 +43,7 @@ impl Display for ArgInfo {
 impl FromStr for ArgInfo {
     type Err = ();
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
         Err(())
     }
 }
@@ -55,8 +55,8 @@ fn make_rules() -> Vec<Rewrite<Logic, LogicConstantFolding>> {
         rw!("comm-xor"; "(^ ?a ?b)" => "(^ ?b ?a)"),
         rw!("comm-and"; "(& ?a ?b)" => "(& ?b ?a)"),
         // Associative
-        rw!("assoc-xor"; "(^ ?a (^ ?b ?c))" => "(^ (^ ?a ?b) ?c)"),
-        rw!("assoc-and"; "(& ?a (& ?b ?c))" => "(& (& ?a ?b) ?c)"),
+        // rw!("assoc-xor"; "(^ ?a (^ ?b ?c))" => "(^ (^ ?a ?b) ?c)"),
+        // rw!("assoc-and"; "(& ?a (& ?b ?c))" => "(& (& ?a ?b) ?c)"),
         rw!("sus-and"; "(& ?a)" => "?a"),
         rw!("sus-xor"; "(^ ?a)" => "?a"),
         // // Logic with constants
@@ -81,20 +81,20 @@ fn make_rules() -> Vec<Rewrite<Logic, LogicConstantFolding>> {
     ]
 }
 
-struct ClassVars {
+struct _ClassVars {
     active: Variable,
     // order: Col,
     nodes: Vec<Variable>,
 }
 
-fn extract_v2(egraph: &EGraph<Logic, LogicConstantFolding>, root: Id) -> RecExpr<Logic> {
+fn _extract_v2(egraph: &EGraph<Logic, LogicConstantFolding>, root: Id) -> RecExpr<Logic> {
     let mut problem = ProblemVariables::new();
     let mut constraints = Vec::new();
 
-    let vars: IndexMap<Id, ClassVars> = egraph
+    let vars: IndexMap<Id, _ClassVars> = egraph
         .classes()
         .map(|class| {
-            let cvars = ClassVars {
+            let cvars = _ClassVars {
                 active: problem.add(variable().binary()),
                 // order: model.add_col(),
                 nodes: class
@@ -221,12 +221,12 @@ pub struct XorMinimizerCost;
 impl LpCostFunction<Logic, LogicConstantFolding> for XorMinimizerCost {
     fn node_cost(
         &mut self,
-        egraph: &EGraph<Logic, LogicConstantFolding>,
+        _egraph: &EGraph<Logic, LogicConstantFolding>,
         _eclass: Id,
         enode: &Logic,
     ) -> f64 {
         match enode {
-            Logic::Xor(srcs) => {
+            Logic::Xor(_srcs) => {
                 // let a = egraph.id_to_expr(*a);
                 // let b = egraph.id_to_expr(*b);
 
@@ -242,13 +242,13 @@ impl LpCostFunction<Logic, LogicConstantFolding> for XorMinimizerCost {
     }
 }
 
-pub struct Bitificator {
+pub struct Logificator {
     egraph: EGraph<Logic, LogicConstantFolding>,
     op_expr: RecExpr<Op>,
     op_cache: FxHashMap<Id, Vec<Id>>,
 }
 
-impl Bitificator {
+impl Logificator {
     pub fn new(expr: RecExpr<Op>) -> Self {
         Self {
             egraph: EGraph::new(LogicConstantFolding),
@@ -257,8 +257,8 @@ impl Bitificator {
         }
     }
 
-    pub fn bitificate(mut self) -> RecExpr<Logic> {
-        let return_ids = self.get_bitificated(Id::from(self.op_expr.as_ref().len() - 1));
+    pub fn build_logic(mut self) -> RecExpr<Logic> {
+        let return_ids = self.get_logificated(Id::from(self.op_expr.as_ref().len() - 1));
         let return_logic = Logic::Register(return_ids.into_boxed_slice());
         let return_id = self.egraph.add(return_logic);
 
@@ -266,7 +266,7 @@ impl Bitificator {
             .with_egraph(self.egraph)
             .with_time_limit(std::time::Duration::from_secs(3600))
             .with_node_limit(30_000)
-            .with_iter_limit(50);
+            .with_iter_limit(55);
         runner.roots.push(return_id);
 
         runner = runner.run(&make_rules());
@@ -290,7 +290,7 @@ impl Bitificator {
         expr
     }
 
-    fn get_bitificated(&mut self, id: Id) -> Vec<Id> {
+    fn get_logificated(&mut self, id: Id) -> Vec<Id> {
         match self.op_cache.get(&id) {
             Some(bits) => bits.clone(),
             None => {
@@ -306,12 +306,12 @@ impl Bitificator {
                         .map(|l| self.egraph.add(l))
                         .collect(),
                     Op::Ternary([cond, then, or]) => {
-                        let cond = self.get_bitificated(cond)[0];
+                        let cond = self.get_logificated(cond)[0];
                         let inv_cond = self.egraph.add(Logic::Not(cond));
 
-                        self.get_bitificated(then)
+                        self.get_logificated(then)
                             .into_iter()
-                            .zip_longest(self.get_bitificated(or).into_iter())
+                            .zip_longest(self.get_logificated(or).into_iter())
                             .map(|thenor| match thenor {
                                 itertools::EitherOrBoth::Both(then, or) => {
                                     let then_cond =
@@ -338,15 +338,15 @@ impl Bitificator {
                     Op::Index([_index, _target]) => todo!(),
                     Op::IndexRange([_from, _to, _target]) => todo!(),
                     Op::Not(a) => self
-                        .get_bitificated(a)
+                        .get_logificated(a)
                         .into_iter()
                         .map(Logic::Not)
                         .map(|l| self.egraph.add(l))
                         .collect(),
                     Op::Xor([a, b]) => self
-                        .get_bitificated(a)
+                        .get_logificated(a)
                         .into_iter()
-                        .zip_longest(self.get_bitificated(b).into_iter())
+                        .zip_longest(self.get_logificated(b).into_iter())
                         .map(|ab| match ab {
                             itertools::EitherOrBoth::Both(a, b) => {
                                 self.egraph.add(Logic::Xor(Box::new([a, b])))
@@ -356,9 +356,9 @@ impl Bitificator {
                         })
                         .collect(),
                     Op::Or([a, b]) => self
-                        .get_bitificated(a)
+                        .get_logificated(a)
                         .into_iter()
-                        .zip_longest(self.get_bitificated(b).into_iter())
+                        .zip_longest(self.get_logificated(b).into_iter())
                         .map(|ab| match ab {
                             itertools::EitherOrBoth::Both(a, b) => {
                                 let not_a = self.egraph.add(Logic::Not(a));
@@ -372,15 +372,15 @@ impl Bitificator {
                         })
                         .collect(),
                     Op::And([a, b]) => self
-                        .get_bitificated(a)
+                        .get_logificated(a)
                         .into_iter()
-                        .zip(self.get_bitificated(b))
+                        .zip(self.get_logificated(b))
                         .map(|(a, b)| Logic::And(Box::new([a, b])))
                         .map(|l| self.egraph.add(l))
                         .collect(),
-                    Op::RShift([target, distance]) => {
+                    Op::Shr([target, distance]) => {
                         let Op::Constant(distance) = self.op_expr[distance].clone() else {todo!()};
-                        self.get_bitificated(target)
+                        self.get_logificated(target)
                             .into_iter()
                             .skip(distance.try_into().unwrap())
                             .collect()

@@ -4,7 +4,7 @@ use petgraph::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    bitificator::Logic,
+    logic::Logic,
     circuit::{Circuit, Qubit, QubitDesc, QubitRegister},
 };
 
@@ -15,8 +15,19 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn new(logic: &RecExpr<Logic>, args: Vec<(String, u32)>) -> Self {
-        let mut circuit = Circuit::new(args.clone());
+    pub fn new(logic: &RecExpr<Logic>) -> Self {
+        let mut args = FxHashMap::default();
+        for logic_op in logic.as_ref() {
+            if let Logic::Arg(arg) = logic_op {
+                args.entry(arg.name.clone())
+                    .and_modify(|a| {
+                        *a = (arg.index + 1).max(*a);
+                    })
+                    .or_insert(arg.index + 1);
+            }
+        }
+
+        let mut circuit = Circuit::default();
         let mut graph = Graph::new();
         let mut node_ids = FxHashMap::default();
 

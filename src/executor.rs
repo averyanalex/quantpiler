@@ -4,7 +4,7 @@ use egg::{Id, Language, RecExpr};
 // use num::{One, Zero};
 use rustc_hash::FxHashMap;
 
-use crate::bitificator::Logic;
+use crate::logic::Logic;
 
 pub fn execute_gates(logic: &RecExpr<Logic>, args: &FxHashMap<String, Vec<bool>>) -> Vec<bool>
 // where
