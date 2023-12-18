@@ -38,8 +38,6 @@ define_language! {
         "/" = Div([Id; 2]),
         "==" = Eq([Id; 2]),
         "?" = Ternary([Id; 3]),
-        "i" = Index([Id; 2]),
-        "ir" = IndexRange([Id; 3]),
         Constant(BigUint),
         Argument(ArgumentInfo),
     }

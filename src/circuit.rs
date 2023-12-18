@@ -1,39 +1,9 @@
-use std::fmt::Display;
-
 use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Debug)]
 pub struct GateX {
     controls: FxHashSet<(Qubit, bool)>,
     target: Qubit,
-}
-
-impl GateX {
-    pub fn format_qasm(
-        &self,
-        _f: &mut std::fmt::Formatter<'_>,
-        _map: &FxHashMap<u32, QubitDesc>,
-    ) -> std::fmt::Result {
-        Ok(())
-        // match self {
-        //     QGate::X(arg) => f.write_fmt(format_args!("x {}", map[arg])),
-        //     QGate::CX { control, target } => {
-        //         f.write_fmt(format_args!("cx {}, {}", map[control], map[target]))
-        //     }
-        //     QGate::Toffoli {
-        //         control_0,
-        //         control_1,
-        //         target,
-        //     } => f.write_fmt(format_args!(
-        //         "ccx {}, {}, {}",
-        //         map[control_0], map[control_1], map[target]
-        //     )),
-        //     QGate::MultiCX {
-        //         controls: _,
-        //         target: _,
-        //     } => f.write_fmt(format_args!("mcx CRINGE FIXME")),
-        // }
-    }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
@@ -52,32 +22,15 @@ pub enum QubitRegister {
     Argument(String),
 }
 
-impl Display for QubitRegister {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            QubitRegister::Ancillary => f.write_str("ancilla"),
-            QubitRegister::Result => f.write_str("result"),
-            QubitRegister::Argument(arg) => write!(f, "{arg}"),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct QubitDesc {
     pub reg: QubitRegister,
     pub index: u32,
 }
 
-impl Display for QubitDesc {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{}[{}]", self.reg, self.index))
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct Circuit {
     pub qubits_count: u32,
-    // free_ancillas: Vec<Qubit>,
     pub gates: Vec<GateX>,
     qubits_map: FxHashMap<Qubit, FxHashSet<QubitDesc>>,
 }
@@ -87,11 +40,6 @@ impl Circuit {
         self.qubits_map
             .entry(qubit)
             .and_modify(|set| {
-                // if description.reg == QubitRegister::Result {
-                //     assert!(set
-                //         .iter()
-                //         .all(|desc| matches!(desc.reg, QubitRegister::Argument(_))));
-                // }
                 set.insert(description.clone());
             })
             .or_insert_with(|| {
@@ -128,9 +76,6 @@ impl Circuit {
     pub fn execute(&self, args: &FxHashMap<String, Vec<bool>>) -> Vec<bool> {
         let mut qubits = FxHashMap::default();
 
-        // dbg!(&self.qubits_map);
-
-        // let qubit_map = self.fill_qubit_map();
         for (qubit, values) in &self.qubits_map {
             for value in values {
                 if let QubitRegister::Argument(arg) = value.reg.clone() {
@@ -139,15 +84,11 @@ impl Circuit {
             }
         }
 
-        // dbg!(&qubits);
-        // dbg!(qubits.len());
-
         for gate in &self.gates {
             qubits.insert(
                 gate.target,
                 qubits.get(&gate.target).unwrap_or(&false)
                     ^ gate.controls.iter().fold(true, |acc, (qubit, inverted)| {
-                        // dbg!(&qubit);
                         acc & (qubits[qubit] ^ inverted)
                     }),
             );
@@ -180,62 +121,4 @@ impl Circuit {
 
         result
     }
-
-    // fn fill_qubit_map(&self) -> FxHashMap<Qubit, QubitDesc> {
-    //     let mut map = self.qubits_map.clone();
-    //     let mut anc_index = 0;
-    //     for id in 0..self.qubits_count {
-    //         map.entry(Qubit(id)).or_insert_with(|| {
-    //             let desc = QubitDesc {
-    //                 reg: QubitRegister::Ancillary,
-    //                 index: anc_index,
-    //             };
-    //             anc_index += 1;
-    //             desc
-    //         });
-    //     }
-    //     map
-    // }
 }
-
-// impl Display for Circuit {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         let mut map = self.qubits_map.clone();
-//         let mut anc_index = 0;
-//         for id in 0..self.next_id {
-//             map.entry(id).or_insert(QubitDesc {
-//                 reg: QubitRegister::Ancillary,
-//                 index: anc_index,
-//             });
-//             anc_index += 1;
-//         }
-
-//         f.write_str("OPENQASM 3.0;\n")?;
-//         f.write_str("include \"stdgates.inc\";\n\n")?;
-
-//         f.write_str("def app")?;
-
-//         f.write_fmt(format_args!(" qubit[{anc_index}] ancilla"))?;
-//         f.write_fmt(format_args!(
-//             ", qubit[{}] result",
-//             map.iter()
-//                 .filter(|(_k, v)| v.reg == QubitRegister::Result)
-//                 .count()
-//         ))?;
-//         for (name, len) in &self.arguments {
-//             f.write_fmt(format_args!(", qubit[{}] {}", len, name))?;
-//         }
-//         f.write_str(" {\n")?;
-
-//         for gate in &self.gates {
-//             f.write_str("  ")?;
-//             gate.format_qasm(f, &map)?;
-//             f.write_str(";\n")?;
-//         }
-
-//         // f.write_str("  reset ancillas;\n")?;
-
-//         f.write_str("}\n")?;
-//         Ok(())
-//     }
-// }

@@ -11,14 +11,24 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions-rust-lang/setup-rust-toolchain@v1
-      with:
-        toolchain: nightly
-        components: rustfmt
-    - name: Run tests
-      run: cargo test --release --verbose
-    - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v3
-      env:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native libraries
+        run: sudo apt-get install coinor-cbc coinor-libcbc-dev
+      - name: Install grcov
+        run: cargo install grcov
+      - name: Run tests
+        run: |
+          export LLVM_PROFILE_FILE="target/coverage/%p-%m.profraw"
+          export RUSTFLAGS="-Cinstrument-coverage"
+          cargo test --release
+          grcov target/coverage -b target/release -o target/coverage --output-types lcov
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4-beta
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          verbose: true
+          fail_ci_if_error: true
+          files: ./target/coverage/lcov

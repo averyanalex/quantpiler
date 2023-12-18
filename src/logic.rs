@@ -1,4 +1,4 @@
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, iter, str::FromStr};
 
 use egg::*;
 use good_lp::{
@@ -335,8 +335,6 @@ impl Logificator {
                         .map(Logic::Const)
                         .map(|l| self.egraph.add(l))
                         .collect(),
-                    Op::Index([_index, _target]) => todo!(),
-                    Op::IndexRange([_from, _to, _target]) => todo!(),
                     Op::Not(a) => self
                         .get_logificated(a)
                         .into_iter()
@@ -385,7 +383,60 @@ impl Logificator {
                             .skip(distance.try_into().unwrap())
                             .collect()
                     }
-                    // Op::Equal([a, b]) => todo!(),
+                    Op::Shl([target, distance]) => {
+                        let Op::Constant(distance) = self.op_expr[distance].clone() else {todo!()};
+                        iter::repeat(self.egraph.add(Logic::Const(false)))
+                            .take(distance.try_into().unwrap())
+                            .chain(self.get_logificated(target).into_iter())
+                            .collect()
+                    }
+                    Op::Add([a, b]) => {
+                        let mut c = None;
+                        let mut bits: Vec<_> = self
+                            .get_logificated(a)
+                            .into_iter()
+                            .zip_longest(self.get_logificated(b).into_iter())
+                            .map(|ab| match ab {
+                                itertools::EitherOrBoth::Both(a, b) => {
+                                    let a_xor_b = self.egraph.add(Logic::Xor(Box::new([a, b])));
+                                    let a_and_b = self.egraph.add(Logic::And(Box::new([a, b])));
+                                    if let Some(cin) = c {
+                                        let cin_and_axorb =
+                                            self.egraph.add(Logic::And(Box::new([cin, a_xor_b])));
+                                        c =
+                                            Some(self.egraph.add(Logic::Xor(Box::new([
+                                                a_and_b,
+                                                cin_and_axorb,
+                                            ]))));
+                                        self.egraph.add(Logic::Xor(Box::new([a_xor_b, cin])))
+                                    } else {
+                                        c = Some(a_and_b);
+                                        a_xor_b
+                                    }
+                                }
+                                itertools::EitherOrBoth::Left(a) => {
+                                    if let Some(cin) = c {
+                                        c = Some(self.egraph.add(Logic::And(Box::new([cin, a]))));
+                                        self.egraph.add(Logic::Xor(Box::new([cin, a])))
+                                    } else {
+                                        a
+                                    }
+                                }
+                                itertools::EitherOrBoth::Right(b) => {
+                                    if let Some(cin) = c {
+                                        c = Some(self.egraph.add(Logic::And(Box::new([cin, b]))));
+                                        self.egraph.add(Logic::Xor(Box::new([cin, b])))
+                                    } else {
+                                        b
+                                    }
+                                }
+                            })
+                            .collect();
+                        if let Some(c) = c {
+                            bits.push(c)
+                        }
+                        bits
+                    }
                     _ => todo!(),
                 };
 

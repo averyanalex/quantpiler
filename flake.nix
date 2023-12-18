@@ -19,11 +19,11 @@
       system: let
         overlays = [(import rust-overlay)];
         pkgs = import nixpkgs {inherit system overlays;};
-        rustNightly = pkgs.rust-bin.nightly.latest.default;
+        rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
       in {
         devShells = {
           default = pkgs.mkShell {
-            buildInputs = [rustNightly pkgs.cbc pkgs.cmake];
+            buildInputs = [rust pkgs.cbc pkgs.cmake];
             LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
             shellHook = with pkgs; ''
               export BINDGEN_EXTRA_CLANG_ARGS="$(< ${stdenv.cc}/nix-support/libc-crt1-cflags) \

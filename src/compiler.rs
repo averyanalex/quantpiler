@@ -1,11 +1,11 @@
 use egg::{Id, Language, RecExpr};
 use itertools::Itertools;
-use petgraph::prelude::*;
+use petgraph::{dot, prelude::*};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    logic::Logic,
     circuit::{Circuit, Qubit, QubitDesc, QubitRegister},
+    logic::Logic,
 };
 
 pub struct Compiler {
@@ -78,6 +78,8 @@ impl Compiler {
                 graph.add_edge(node_ids[child], graph_parent_id, LogicEdge { done: false });
             }
         }
+
+        dbg!(dot::Dot::with_config(&graph, &[dot::Config::EdgeNoLabel]));
 
         Self {
             circuit,
@@ -160,7 +162,7 @@ impl Compiler {
                     mcx_sources.insert((source_qubit, false));
                 } else {
                     match graph[source].kind {
-                        LogicNodeKind::And => collect_sources_of_and(and, graph, mcx_sources),
+                        LogicNodeKind::And => collect_sources_of_and(source, graph, mcx_sources),
                         LogicNodeKind::Not => {
                             let arg_of_not = graph
                                 .neighbors_directed(source, Direction::Incoming)
@@ -236,10 +238,19 @@ impl Compiler {
             LogicNodeKind::And => {
                 self.construct_mcx(target, target_qubit);
             }
-            LogicNodeKind::Not => {
-                self.circuit
-                    .cx(self.graph[source].qubit.unwrap(), true, target_qubit);
-            }
+            LogicNodeKind::Not => match self.graph[source].qubit {
+                Some(qubit) => {
+                    self.circuit.cx(qubit, true, target_qubit);
+                }
+                None => {
+                    if matches!(self.graph[source].kind, LogicNodeKind::And) {
+                        self.construct_mcx(target, target_qubit);
+                        self.circuit.x(target_qubit);
+                    } else {
+                        todo!();
+                    }
+                }
+            },
             LogicNodeKind::Arg => todo!(),
             LogicNodeKind::Register => todo!(),
             LogicNodeKind::Constant(_) => todo!(),

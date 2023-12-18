@@ -1,26 +1,60 @@
+use num::{BigUint, Zero};
 use rand::Rng;
 use rustc_hash::FxHashMap;
 
-use crate::builder::{Expression, OpBuilder};
+use crate::builder::{Expression, Op, OpBuilder};
 
-fn test_expr(builder: &OpBuilder, value: Expression<'_>, size: u32) {
+fn vec_bool_to_biguint(input: &[bool]) -> BigUint {
+    let mut res = BigUint::zero();
+    for (idx, bit) in input.iter().enumerate() {
+        if *bit {
+            res += 2u128.pow(idx as u32);
+        }
+    }
+    res
+}
+
+fn test_expr(builder: &OpBuilder, value: Expression<'_>) {
     let expr = builder.build(value);
-    let logic = crate::logic::Logificator::new(expr).build_logic();
+
+    let mut arguments = FxHashMap::default();
+    for op in expr.as_ref() {
+        if let Op::Argument(a) = op {
+            assert!(arguments.insert(a.name.clone(), a.size).is_none())
+        }
+    }
+
+    let logic = crate::logic::Logificator::new(expr.clone()).build_logic();
+    dbg!(&logic);
+
     let circuit = crate::compiler::Compiler::new(&logic).compile();
 
-    for _ in 0..1024 {
-        let mut args = FxHashMap::default();
+    for _ in 0..4096 {
+        let mut rng_bits_args = FxHashMap::default();
         let mut rng = rand::thread_rng();
-        args.insert(
-            "input".into(),
-            std::iter::repeat_with(|| rng.gen())
-                .take(size as usize)
-                .collect(),
-        );
 
-        let bits_result = crate::executor::execute_gates(&logic, &args);
-        let circuit_result = circuit.execute(&args);
-        assert_eq!(bits_result, circuit_result);
+        for (name, size) in &arguments {
+            rng_bits_args.insert(
+                name.clone(),
+                std::iter::repeat_with(|| rng.gen())
+                    .take(*size as usize)
+                    .collect::<Vec<_>>(),
+            );
+        }
+
+        let rng_biguint_args: FxHashMap<_, _> = rng_bits_args
+            .iter()
+            .map(|(name, bits)| (name.clone(), vec_bool_to_biguint(bits.as_slice())))
+            .collect();
+
+        let op_result = crate::executor::execute_op(&expr, &rng_biguint_args);
+        let logic_result = crate::executor::execute_logic(&logic, &rng_bits_args);
+        let biguint_logic_result = vec_bool_to_biguint(&logic_result);
+
+        assert_eq!(op_result, biguint_logic_result);
+
+        let circuit_result = circuit.execute(&rng_bits_args);
+        assert_eq!(logic_result, circuit_result);
     }
 }
 
@@ -47,5 +81,93 @@ fn crc32() {
         value = table(&builder, ch) ^ (value >> 8u32);
     }
 
-    test_expr(&builder, value, size);
+    test_expr(&builder, value);
+}
+
+#[test]
+fn add() {
+    let builder = crate::builder::OpBuilder::default();
+    test_expr(
+        &builder,
+        builder.argument("a", 32) + builder.argument("b", 16),
+    );
+}
+
+#[test]
+fn many_add() {
+    let builder = crate::builder::OpBuilder::default();
+    test_expr(
+        &builder,
+        builder.argument("a", 32)
+            + builder.argument("b", 20)
+            + builder.argument("c", 27)
+            + builder.argument("d", 10)
+            + builder.argument("e", 24),
+    );
+}
+
+#[test]
+fn and() {
+    let builder = crate::builder::OpBuilder::default();
+    test_expr(
+        &builder,
+        builder.argument("a", 32) & builder.argument("b", 16),
+    );
+}
+
+#[test]
+fn many_and() {
+    let builder = crate::builder::OpBuilder::default();
+    test_expr(
+        &builder,
+        builder.argument("a", 32)
+            & builder.argument("b", 20)
+            & builder.argument("c", 27)
+            & builder.argument("d", 10)
+            & builder.argument("e", 24),
+    );
+}
+
+#[test]
+fn or() {
+    let builder = crate::builder::OpBuilder::default();
+    test_expr(
+        &builder,
+        builder.argument("a", 32) | builder.argument("b", 16),
+    );
+}
+
+#[test]
+fn many_or() {
+    let builder = crate::builder::OpBuilder::default();
+    test_expr(
+        &builder,
+        builder.argument("a", 32)
+            | builder.argument("b", 20)
+            | builder.argument("c", 27)
+            | builder.argument("d", 10)
+            | builder.argument("e", 24),
+    );
+}
+
+#[test]
+fn xor() {
+    let builder = crate::builder::OpBuilder::default();
+    test_expr(
+        &builder,
+        builder.argument("a", 32) ^ builder.argument("b", 16),
+    );
+}
+
+#[test]
+fn many_xor() {
+    let builder = crate::builder::OpBuilder::default();
+    test_expr(
+        &builder,
+        builder.argument("a", 32)
+            ^ builder.argument("b", 20)
+            ^ builder.argument("c", 27)
+            ^ builder.argument("d", 10)
+            ^ builder.argument("e", 24),
+    );
 }
