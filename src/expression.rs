@@ -1,13 +1,13 @@
 use std::sync::{Arc, Mutex};
 
-use egg::{AstSize, EGraph, Id, RecExpr, Runner};
+use egg::{EGraph, Id, RecExpr, Runner};
 use num::BigUint;
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 
 #[cfg(feature = "python")]
 use crate::circuit::Circuit;
-use crate::op::{make_rules, ArgumentInfo, Op, OpAnalyzer};
+use crate::op::{make_rules, ArgumentInfo, Op, OpAnalyzer, OpCost};
 
 #[derive(Clone)]
 pub struct Expression {
@@ -35,7 +35,7 @@ impl Expression {
 
         runner = runner.run(&make_rules());
 
-        crate::extract::extract(&runner.egraph, runner.roots[0], AstSize)
+        crate::extract::extract(&runner.egraph, runner.roots[0], OpCost)
     }
 
     pub fn argument<N: Into<String>>(&self, name: N, size: u32) -> Self {

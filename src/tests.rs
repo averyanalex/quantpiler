@@ -25,7 +25,7 @@ fn test_expr(value: Expression) {
     }
 
     let logic = crate::logic::Logificator::new(expr.clone()).build_logic();
-    dbg!(&logic);
+    // dbg!(&logic);
 
     let circuit = crate::compiler::Compiler::new(&logic).compile();
 

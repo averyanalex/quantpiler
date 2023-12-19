@@ -3,6 +3,8 @@ use std::{fmt::Display, str::FromStr};
 use egg::{define_language, Analysis, DidMerge, EGraph, Id, Rewrite};
 use num::BigUint;
 
+use crate::extract::LpCostFunction;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ArgumentInfo {
     pub size: u32,
@@ -102,4 +104,27 @@ pub fn make_rules() -> Vec<Rewrite<Op, OpAnalyzer>> {
         rw!("cancel-xor-not-not"; "(^ (! ?a) (! ?b))" => "(^ ?a ?b)"),
         rw!("not-xor-xor-not"; "(! (^ ?a ?b))" => "(^ (! ?a) ?b)"),
     ]
+}
+
+pub struct OpCost;
+
+impl LpCostFunction<Op, OpAnalyzer> for OpCost {
+    fn node_cost(&mut self, _egraph: &EGraph<Op, OpAnalyzer>, _eclass: Id, enode: &Op) -> f64 {
+        match enode {
+            Op::Not(_) => 1.0,
+            Op::Xor(_) => 4.0,
+            Op::Or(_) => 8.0,
+            Op::And(_) => 6.0,
+            Op::Shr(_) => 0.5,
+            Op::Shl(_) => 0.5,
+            Op::Add(_) => 16.0,
+            Op::Sub(_) => 16.0,
+            Op::Mul(_) => 32.0,
+            Op::Div(_) => 32.0,
+            Op::Eq(_) => 32.0,
+            Op::Ternary(_) => 8.0,
+            Op::Constant(_) => 0.1,
+            Op::Argument(_) => 0.1,
+        }
+    }
 }

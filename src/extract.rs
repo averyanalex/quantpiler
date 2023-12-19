@@ -1,13 +1,24 @@
-use std::{fmt::Display, collections::HashMap};
+use std::{collections::HashMap, fmt::Display};
 
-use egg::{Analysis, EGraph, Id, Language, LpCostFunction, RecExpr};
-use egraph_serialize::{ClassId, NodeId, Node};
+use egg::{Analysis, EGraph, Id, Language, RecExpr};
+use egraph_serialize::{ClassId, Node, NodeId};
+use good_lp::{
+    constraint, solvers::highs::HighsParallelType, variable, Expression, ProblemVariables,
+    Solution, SolverModel, Variable,
+};
 use indexmap::IndexMap;
 use rustc_hash::FxHashMap;
 
-use coin_cbc::{Col, Model, Sense};
 use indexmap::IndexSet;
 use ordered_float::NotNan;
+
+pub trait LpCostFunction<L: Language, N: Analysis<L>> {
+    /// Returns the cost of the given e-node.
+    ///
+    /// This function may look at other parts of the e-graph to compute the cost
+    /// of the given e-node.
+    fn node_cost(&mut self, egraph: &EGraph<L, N>, eclass: Id, enode: &L) -> f64;
+}
 
 // Most of this code was taken from https://github.com/egraphs-good/extraction-gym/tree/main
 pub type Cost = NotNan<f64>;
@@ -71,7 +82,11 @@ impl ExtractionResult {
         self.choices.insert(class_id, node_id);
     }
 
-    pub fn find_cycles(&self, egraph: &egraph_serialize::EGraph, roots: &[ClassId]) -> Vec<ClassId> {
+    pub fn find_cycles(
+        &self,
+        egraph: &egraph_serialize::EGraph,
+        roots: &[ClassId],
+    ) -> Vec<ClassId> {
         // let mut status = vec![Status::Todo; egraph.classes().len()];
         let mut status = IndexMap::<ClassId, Status>::default();
         let mut cycles = vec![];
@@ -151,7 +166,12 @@ impl ExtractionResult {
         costs.values().sum()
     }
 
-    pub fn node_sum_cost<M>(&self, egraph: &egraph_serialize::EGraph, node: &Node, costs: &M) -> Cost
+    pub fn node_sum_cost<M>(
+        &self,
+        egraph: &egraph_serialize::EGraph,
+        node: &Node,
+        costs: &M,
+    ) -> Cost
     where
         M: MapGet<ClassId, Cost>,
     {
@@ -168,17 +188,20 @@ impl ExtractionResult {
 }
 
 struct ClassVars {
-    active: Col,
-    nodes: Vec<Col>,
+    active: Variable,
+    nodes: Vec<Variable>,
 }
 
 pub struct CbcExtractor;
 impl Extractor for CbcExtractor {
     fn extract(&self, egraph: &egraph_serialize::EGraph, roots: &[ClassId]) -> ExtractionResult {
-        let mut model = Model::default();
+        // let mut model = Model::default();
 
-        let true_literal = model.add_binary();
-        model.set_col_lower(true_literal, 1.0);
+        let mut problem_vars = ProblemVariables::new();
+        let mut constraints = Vec::new();
+
+        let true_literal = problem_vars.add(variable().binary());
+        constraints.push(constraint!(true_literal == 1.0));
 
         let vars: IndexMap<ClassId, ClassVars> = egraph
             .classes()
@@ -189,9 +212,13 @@ impl Extractor for CbcExtractor {
                         // Roots must be active.
                         true_literal
                     } else {
-                        model.add_binary()
+                        problem_vars.add(variable().binary())
                     },
-                    nodes: class.nodes.iter().map(|_| model.add_binary()).collect(),
+                    nodes: class
+                        .nodes
+                        .iter()
+                        .map(|_| problem_vars.add(variable().binary()))
+                        .collect(),
                 };
                 (class.id.clone(), cvars)
             })
@@ -200,12 +227,12 @@ impl Extractor for CbcExtractor {
         for (class_id, class) in &vars {
             // class active == some node active
             // sum(for node_active in class) == class_active
-            let row = model.add_row();
-            model.set_row_equal(row, 0.0);
-            model.set_weight(row, class.active, -1.0);
+            // let row = model.add_row();
+            let mut row = -class.active;
             for &node_active in &class.nodes {
-                model.set_weight(row, node_active, 1.0);
+                row += node_active;
             }
+            constraints.push(constraint!(row == 0.0));
 
             let childrens_classes_var = |nid: NodeId| {
                 egraph[&nid]
@@ -216,7 +243,7 @@ impl Extractor for CbcExtractor {
                     .collect::<IndexSet<_>>()
             };
 
-            let mut intersection: IndexSet<Col> =
+            let mut intersection: IndexSet<_> =
                 childrens_classes_var(egraph[class_id].nodes[0].clone());
 
             for node in &egraph[class_id].nodes[1..] {
@@ -229,10 +256,8 @@ impl Extractor for CbcExtractor {
             // A class being active implies that all in the intersection
             // of it's children are too.
             for c in &intersection {
-                let row = model.add_row();
-                model.set_row_upper(row, 0.0);
-                model.set_weight(row, class.active, 1.0);
-                model.set_weight(row, *c, -1.0);
+                let row = class.active - *c;
+                constraints.push(constraint!(row <= 0.0));
             }
 
             for (node_id, &node_active) in egraph[class_id].nodes.iter().zip(&class.nodes) {
@@ -241,16 +266,16 @@ impl Extractor for CbcExtractor {
                     //   node_active <= child_active
                     //   node_active - child_active <= 0
                     if !intersection.contains(&child_active) {
-                        let row = model.add_row();
-                        model.set_row_upper(row, 0.0);
-                        model.set_weight(row, node_active, 1.0);
-                        model.set_weight(row, child_active, -1.0);
+                        let row = node_active - child_active;
+                        constraints.push(constraint!(row <= 0.0));
                     }
                 }
             }
         }
 
-        model.set_obj_sense(Sense::Minimize);
+        let mut total_cost = Expression::from(0);
+
+        // model.set_obj_sense(Sense::Minimize);
         for class in egraph.classes().values() {
             let min_cost = class
                 .nodes
@@ -264,7 +289,8 @@ impl Extractor for CbcExtractor {
             // For example if the members' costs are [1,1,1], three terms get
             // replaced by one in the objective function.
             if min_cost != 0.0 {
-                model.set_obj_coeff(vars[&class.id].active, min_cost);
+                total_cost += vars[&class.id].active * min_cost;
+                // model.set_obj_coeff(vars[&class.id].active, min_cost);
             }
 
             for (node_id, &node_active) in class.nodes.iter().zip(&vars[&class.id].nodes) {
@@ -273,7 +299,8 @@ impl Extractor for CbcExtractor {
                 assert!(node_cost >= 0.0);
 
                 if node_cost != 0.0 {
-                    model.set_obj_coeff(node_active, node_cost);
+                    total_cost += node_active * node_cost;
+                    // model.set_obj_coeff(node_active, node_cost);
                 }
             }
         }
@@ -285,30 +312,39 @@ impl Extractor for CbcExtractor {
         for (class_id, class_vars) in &vars {
             for (i, &node_active) in class_vars.nodes.iter().enumerate() {
                 if banned_cycles.contains(&(class_id.clone(), i)) {
-                    model.set_col_upper(node_active, 0.0);
-                    model.set_col_lower(node_active, 0.0);
+                    constraints.push(constraint!(node_active == 0.0));
                 }
             }
         }
         log::info!("@blocked {}", banned_cycles.len());
 
-        let solution = model.solve();
-        log::info!(
-            "CBC status {:?}, {:?}, obj = {}",
-            solution.raw().status(),
-            solution.raw().secondary_status(),
-            solution.raw().obj_value(),
+        let problem = constraints.into_iter().fold(
+            problem_vars
+                .minimise(total_cost)
+                .using(good_lp::default_solver),
+            |acc, constraint| acc.with(constraint),
         );
+        let problem = problem.set_parallel(HighsParallelType::On);
+
+        let solution = problem.solve().unwrap();
+
+        // let solution = model.solve();
+        // log::info!(
+        //     "CBC status {:?}, {:?}, obj = {}",
+        //     solution.raw().status(),
+        //     solution.raw().secondary_status(),
+        //     solution.raw().obj_value(),
+        // );
 
         let mut result = ExtractionResult::default();
 
         for (id, var) in &vars {
-            let active = solution.col(var.active) > 0.0;
+            let active = solution.value(var.active) > 0.0;
             if active {
                 let node_idx = var
                     .nodes
                     .iter()
-                    .position(|&n| solution.col(n) > 0.0)
+                    .position(|&n| solution.value(n) > 0.0)
                     .unwrap();
                 let node_id = egraph[id].nodes[node_idx].clone();
                 result.choose(id.clone(), node_id);

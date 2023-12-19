@@ -1,6 +1,6 @@
 use egg::{Id, Language, RecExpr};
 use itertools::Itertools;
-use petgraph::{dot, prelude::*};
+use petgraph::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
@@ -79,7 +79,7 @@ impl Compiler {
             }
         }
 
-        dbg!(dot::Dot::with_config(&graph, &[dot::Config::EdgeNoLabel]));
+        // dbg!(dot::Dot::with_config(&graph, &[dot::Config::EdgeNoLabel]));
 
         Self {
             circuit,

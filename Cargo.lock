@@ -114,31 +114,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "coin_cbc"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d602045cd2e7ad02608a71492af94357f493a6f3c934ce854c03bf10fddc5780"
-dependencies = [
- "coin_cbc_sys",
- "lazy_static",
-]
-
-[[package]]
-name = "coin_cbc_sys"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "085619f8bdc38e24e25c6336ecc3f2e6c0543d67566dff6daef0e32f7ac20f76"
-dependencies = [
- "pkg-config",
-]
-
-[[package]]
 name = "egg"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96beaf9d35dbc4686bc86a4ecb851fd6a406f0bf32d9f646b1225a5c5cf5b5d7"
 dependencies = [
- "coin_cbc",
  "env_logger",
  "fxhash",
  "hashbrown 0.12.3",
@@ -557,12 +537,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pkg-config"
-version = "0.3.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26072860ba924cbfa98ea39c8c19b4dd6a4a25423dbdf219c1eca91aa0cf6964"
-
-[[package]]
 name = "ppv-lite86"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -652,7 +626,6 @@ dependencies = [
 name = "quantpiler"
 version = "0.3.0"
 dependencies = [
- "coin_cbc",
  "egg",
  "egraph-serialize",
  "good_lp",

@@ -1,15 +1,10 @@
 use std::{fmt::Display, iter, str::FromStr};
 
 use egg::*;
-use good_lp::{
-    constraint, solvers::highs::HighsParallelType, variable, Expression, ProblemVariables,
-    Solution, SolverModel, Variable,
-};
-use indexmap::IndexMap;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
-use crate::op::Op;
+use crate::{op::Op, extract::LpCostFunction};
 
 define_language! {
     pub enum Logic {
@@ -79,89 +74,6 @@ fn make_rules() -> Vec<Rewrite<Logic, LogicConstantFolding>> {
         // rw!("create-xor-not-not"; "(^ ?a ?b)" => "(^ (! ?a) (! ?b))"),
         rw!("not-xor-xor-not"; "(! (^ ?a ?b))" => "(^ (! ?a) ?b)"),
     ]
-}
-
-struct _ClassVars {
-    active: Variable,
-    // order: Col,
-    nodes: Vec<Variable>,
-}
-
-fn _extract_v2(egraph: &EGraph<Logic, LogicConstantFolding>, root: Id) -> RecExpr<Logic> {
-    let mut problem = ProblemVariables::new();
-    let mut constraints = Vec::new();
-
-    let vars: IndexMap<Id, _ClassVars> = egraph
-        .classes()
-        .map(|class| {
-            let cvars = _ClassVars {
-                active: problem.add(variable().binary()),
-                // order: model.add_col(),
-                nodes: class
-                    .nodes
-                    .iter()
-                    .map(|_| problem.add(variable().binary()))
-                    .collect(),
-            };
-            // model.set_col_upper(cvars.order, max_order);
-            (class.id, cvars)
-        })
-        .collect();
-
-    for (id, class) in &vars {
-        let active_nodes_in_class = class
-            .nodes
-            .iter()
-            .fold(Expression::from(0), |acc, active| acc + active);
-
-        constraints.push((active_nodes_in_class - class.active).eq(0));
-
-        for (node, &node_active) in egraph[*id].nodes.iter().zip(&class.nodes) {
-            for child in node.children() {
-                let child_active = vars[child].active;
-                constraints.push(constraint!(node_active - child_active <= 0));
-            }
-        }
-    }
-
-    constraints.push(constraint!(vars[&root].active == 1));
-
-    let cost = vars
-        .iter()
-        .map(|(_, vars)| {
-            vars.nodes
-                .iter()
-                .fold(Expression::from(0), |acc, active| acc + active)
-        })
-        .fold(Expression::from(0), |acc, active| acc + active);
-
-    let problem = constraints.into_iter().fold(
-        problem.minimise(cost).using(good_lp::default_solver),
-        |acc, constraint| acc.with(constraint),
-    );
-
-    let mut problem = problem.set_parallel(HighsParallelType::On).set_threads(16);
-    problem.set_verbose(true);
-
-    let solution = problem.solve().unwrap();
-
-    let mut choices = FxHashMap::default();
-
-    for class in egraph.classes() {
-        let Some((logic, _)) = class
-            .nodes
-            .iter()
-            .zip(vars[&class.id].nodes.iter())
-            .find(|(_, active)| solution.value(**active) == 1.0) else {continue;};
-        choices.insert(class.id, logic);
-    }
-
-    println!("sus {:?}", choices);
-
-    let get_first_enode = |id| choices[&id].clone();
-    let expr = get_first_enode(root).build_recexpr(get_first_enode);
-    println!("sus2");
-    expr
 }
 
 #[derive(Default)]
@@ -265,13 +177,11 @@ impl Logificator {
         let mut runner = Runner::default()
             .with_egraph(self.egraph)
             .with_time_limit(std::time::Duration::from_secs(3600))
-            .with_node_limit(1000)
+            .with_node_limit(1200)
             .with_iter_limit(20);
         runner.roots.push(return_id);
 
         runner = runner.run(&make_rules());
-
-        // extract_v2(&runner.egraph, runner.roots[0]);
 
         let expr = crate::extract::extract(&runner.egraph, runner.roots[0], XorMinimizerCost);
 
