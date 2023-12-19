@@ -14,3 +14,20 @@
 - Alexander Averyanov - author
 - Evgeny Kiktenko - mentor
 - Dmitry Ershov - helped with the optimizer design
+
+## Example:
+```python
+import quantpiler
+
+a = quantpiler.Expr("a", 3)
+b = a.argument("b", 2)
+add = a + b
+xor = add ^ 0b100
+and_const = xor & 0b111
+
+circ = and_const.compile()
+qc = quantpiler.circuit_to_qiskit(circ)
+
+qc.draw('mpl')
+```
+![result](example.png)

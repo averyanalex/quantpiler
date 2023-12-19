@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
-use crate::builder::Op;
+use crate::op::Op;
 
 define_language! {
     pub enum Logic {
@@ -55,8 +55,8 @@ fn make_rules() -> Vec<Rewrite<Logic, LogicConstantFolding>> {
         rw!("comm-xor"; "(^ ?a ?b)" => "(^ ?b ?a)"),
         rw!("comm-and"; "(& ?a ?b)" => "(& ?b ?a)"),
         // Associative
-        // rw!("assoc-xor"; "(^ ?a (^ ?b ?c))" => "(^ (^ ?a ?b) ?c)"),
-        // rw!("assoc-and"; "(& ?a (& ?b ?c))" => "(& (& ?a ?b) ?c)"),
+        rw!("assoc-xor"; "(^ ?a (^ ?b ?c))" => "(^ (^ ?a ?b) ?c)"),
+        rw!("assoc-and"; "(& ?a (& ?b ?c))" => "(& (& ?a ?b) ?c)"),
         rw!("sus-and"; "(& ?a)" => "?a"),
         rw!("sus-xor"; "(^ ?a)" => "?a"),
         // // Logic with constants
@@ -265,8 +265,8 @@ impl Logificator {
         let mut runner = Runner::default()
             .with_egraph(self.egraph)
             .with_time_limit(std::time::Duration::from_secs(3600))
-            .with_node_limit(30_000)
-            .with_iter_limit(55);
+            .with_node_limit(1000)
+            .with_iter_limit(20);
         runner.roots.push(return_id);
 
         runner = runner.run(&make_rules());
@@ -330,11 +330,18 @@ impl Logificator {
                             })
                             .collect()
                     }
-                    Op::Constant(value) => (0..32)
-                        .map(|i| ((u32::try_from(value.clone()).unwrap() >> i) & 1) == 1)
+                    Op::Constant(value) => (0..64)
+                        .map(|i| ((u64::try_from(value.clone()).unwrap() >> i) & 1) == 1)
+                        .rev()
+                        .collect_vec()
+                        .into_iter()
+                        .skip_while(|x| !x)
                         .map(Logic::Const)
                         .map(|l| self.egraph.add(l))
-                        .collect(),
+                        .collect_vec()
+                        .into_iter()
+                        .rev()
+                        .collect_vec(),
                     Op::Not(a) => self
                         .get_logificated(a)
                         .into_iter()

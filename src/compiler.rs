@@ -4,7 +4,7 @@ use petgraph::{dot, prelude::*};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    circuit::{Circuit, Qubit, QubitDesc, QubitRegister},
+    circuit::{Circuit, Qubit, QubitDesc, QubitRegister, QubitRegisterEnum},
     logic::Logic,
 };
 
@@ -42,7 +42,7 @@ impl Compiler {
                         circuit.add_qubit_description(
                             q,
                             QubitDesc {
-                                reg: QubitRegister::Argument(name.clone()),
+                                reg: QubitRegister(QubitRegisterEnum::Argument(name.clone())),
                                 index: i,
                             },
                         );
@@ -388,7 +388,7 @@ impl Compiler {
             self.circuit.add_qubit_description(
                 self.graph[node].qubit.unwrap(),
                 QubitDesc {
-                    reg: QubitRegister::Result,
+                    reg: QubitRegister(QubitRegisterEnum::Result),
                     index: idx as u32,
                 },
             )

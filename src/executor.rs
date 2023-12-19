@@ -3,7 +3,7 @@ use itertools::Itertools;
 use num::{BigUint, FromPrimitive, One, Zero};
 use rustc_hash::FxHashMap;
 
-use crate::{builder::Op, logic::Logic};
+use crate::{logic::Logic, op::Op};
 
 pub fn execute_logic(logic: &RecExpr<Logic>, args: &FxHashMap<String, Vec<bool>>) -> Vec<bool> {
     let mut done: FxHashMap<Id, bool> = FxHashMap::default();

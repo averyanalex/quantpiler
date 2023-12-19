@@ -2,7 +2,7 @@ use num::{BigUint, Zero};
 use rand::Rng;
 use rustc_hash::FxHashMap;
 
-use crate::builder::{Expression, Op, OpBuilder};
+use crate::{expression::Expression, op::Op};
 
 fn vec_bool_to_biguint(input: &[bool]) -> BigUint {
     let mut res = BigUint::zero();
@@ -14,8 +14,8 @@ fn vec_bool_to_biguint(input: &[bool]) -> BigUint {
     res
 }
 
-fn test_expr(builder: &OpBuilder, value: Expression<'_>) {
-    let expr = builder.build(value);
+fn test_expr(value: Expression) {
+    let expr = value.build();
 
     let mut arguments = FxHashMap::default();
     for op in expr.as_ref() {
@@ -60,114 +60,99 @@ fn test_expr(builder: &OpBuilder, value: Expression<'_>) {
 
 #[test]
 fn crc32() {
-    let builder = crate::builder::OpBuilder::default();
-    let mut value = builder.constant(0xFFFFFFFFu32);
     let size = 32;
-    let input = builder.argument("input", size);
 
-    fn table<'a>(builder: &'a OpBuilder, mut ch: Expression<'a>) -> Expression<'a> {
+    let input = Expression::new("input", size);
+    let mut value = input.constant(0xFFFFFFFFu32);
+
+    fn table(mut ch: Expression) -> Expression {
         let poly = 0xEDB88320u32;
 
-        let mut table = builder.constant(0u32);
+        let mut table = ch.constant(0u32);
         for _ in 0..8u32 {
-            table = builder.ternary((ch ^ table) & 1u32, (table >> 1u32) ^ poly, table >> 1u32);
+            table = ((ch.clone() ^ table.clone()) & 1u32)
+                .ternary((table.clone() >> 1u32) ^ poly, table >> 1u32);
             ch = ch >> 1u32;
         }
         table
     }
 
-    for byte in (0..(size / 8)).map(|i| (input >> (i * 8)) & 0xFFu32) {
-        let ch = (byte ^ value) & 0xFFu32;
-        value = table(&builder, ch) ^ (value >> 8u32);
+    for byte in (0..(size / 8)).map(|i| (input.clone() >> (i * 8)) & 0xFFu32) {
+        let ch = (byte ^ value.clone()) & 0xFFu32;
+        value = table(ch) ^ (value >> 8u32);
     }
 
-    test_expr(&builder, value);
+    test_expr(value);
 }
 
 #[test]
 fn add() {
-    let builder = crate::builder::OpBuilder::default();
-    test_expr(
-        &builder,
-        builder.argument("a", 32) + builder.argument("b", 16),
-    );
+    let a = Expression::new("a", 32);
+    test_expr(a.clone() + a.argument("b", 16));
 }
 
 #[test]
 fn many_add() {
-    let builder = crate::builder::OpBuilder::default();
+    let a = Expression::new("a", 32);
     test_expr(
-        &builder,
-        builder.argument("a", 32)
-            + builder.argument("b", 20)
-            + builder.argument("c", 27)
-            + builder.argument("d", 10)
-            + builder.argument("e", 24),
+        a.clone()
+            + a.argument("b", 20)
+            + a.argument("c", 27)
+            + a.argument("d", 10)
+            + a.argument("e", 24),
     );
 }
 
 #[test]
 fn and() {
-    let builder = crate::builder::OpBuilder::default();
-    test_expr(
-        &builder,
-        builder.argument("a", 32) & builder.argument("b", 16),
-    );
+    let a = Expression::new("a", 32);
+    test_expr(a.clone() & a.argument("b", 16));
 }
 
 #[test]
 fn many_and() {
-    let builder = crate::builder::OpBuilder::default();
+    let a = Expression::new("a", 32);
     test_expr(
-        &builder,
-        builder.argument("a", 32)
-            & builder.argument("b", 20)
-            & builder.argument("c", 27)
-            & builder.argument("d", 10)
-            & builder.argument("e", 24),
+        a.clone()
+            & a.argument("b", 20)
+            & a.argument("c", 27)
+            & a.argument("d", 10)
+            & a.argument("e", 24),
     );
 }
 
 #[test]
 fn or() {
-    let builder = crate::builder::OpBuilder::default();
-    test_expr(
-        &builder,
-        builder.argument("a", 32) | builder.argument("b", 16),
-    );
+    let a = Expression::new("a", 32);
+    test_expr(a.clone() | a.argument("b", 16));
 }
 
 #[test]
 fn many_or() {
-    let builder = crate::builder::OpBuilder::default();
+    let a = Expression::new("a", 32);
     test_expr(
-        &builder,
-        builder.argument("a", 32)
-            | builder.argument("b", 20)
-            | builder.argument("c", 27)
-            | builder.argument("d", 10)
-            | builder.argument("e", 24),
+        a.clone()
+            | a.argument("b", 20)
+            | a.argument("c", 27)
+            | a.argument("d", 10)
+            | a.argument("e", 24),
     );
 }
 
 #[test]
 fn xor() {
-    let builder = crate::builder::OpBuilder::default();
-    test_expr(
-        &builder,
-        builder.argument("a", 32) ^ builder.argument("b", 16),
-    );
+    let a = Expression::new("a", 32);
+    test_expr(a.clone() ^ a.argument("b", 16));
 }
 
 #[test]
 fn many_xor() {
-    let builder = crate::builder::OpBuilder::default();
+    let a = Expression::new("a", 32);
     test_expr(
-        &builder,
-        builder.argument("a", 32)
-            ^ builder.argument("b", 20)
-            ^ builder.argument("c", 27)
-            ^ builder.argument("d", 10)
-            ^ builder.argument("e", 24),
+        a.clone()
+            ^ a.argument("b", 20)
+            ^ a.argument("c", 27)
+            ^ a.argument("d", 10)
+            ^ a.argument("e", 24),
     );
 }

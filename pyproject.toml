@@ -1,0 +1,26 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "quantpiler"
+requires-python = ">=3.8"
+classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    # "Operating System :: Microsoft :: Windows",
+    # "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+keywords = ["qiskit", "quantum"]
+dynamic = ["version"]
+dependencies = ["qiskit>=0.40"]
+
+[tool.maturin]
+features = ["python"]
+compatibility = "linux"
