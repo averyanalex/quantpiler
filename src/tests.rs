@@ -86,6 +86,17 @@ fn crc32() {
 }
 
 #[test]
+fn example() {
+    let a = Expression::new("input", 3);
+    let b = a.argument("b", 2);
+    let add = a + b;
+    let xor = add ^ 0b100u32;
+    let and_const = xor & 0b111u32;
+
+    test_expr(and_const);
+}
+
+#[test]
 fn add() {
     let a = Expression::new("a", 32);
     test_expr(a.clone() + a.argument("b", 16));

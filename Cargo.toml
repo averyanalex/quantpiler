@@ -1,6 +1,6 @@
 [package]
 name = "quantpiler"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Alexander Averyanov <alex@averyan.ru>"]
 edition = "2021"
 description = "Сompiler of classical algorithms into oracles for quantum computing"

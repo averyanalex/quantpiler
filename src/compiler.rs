@@ -258,8 +258,8 @@ impl Compiler {
     }
 
     pub fn compile(mut self) -> Circuit {
-        let mut allocs = 0u32;
-        let mut optimal = 0u32;
+        // let mut allocs = 0u32;
+        // let mut optimal = 0u32;
 
         for node in self.graph.node_weights_mut() {
             if let LogicNodeKind::Constant(value) = node.kind {
@@ -331,7 +331,7 @@ impl Compiler {
                     self.make_edge_done(*edge);
 
                     did_something_optimal = true;
-                    optimal += 1;
+                    // optimal += 1;
                 } else if self.count_undone_dependents(source) == 1
                 && self.graph[target].kind == LogicNodeKind::Xor && let Some(source_qubit) = self.graph[source].qubit
                 {
@@ -343,7 +343,7 @@ impl Compiler {
                     self.make_edge_done(*edge);
 
                     did_something_optimal = true;
-                    optimal += 1;
+                    // optimal += 1;
                 } else if self.count_undone_dependents(source) == 1
                 && self.graph[target].kind == LogicNodeKind::Not && let Some(source_qubit) = self.graph[source].qubit
                 {
@@ -357,7 +357,7 @@ impl Compiler {
                     self.make_edge_done(*edge);
 
                     did_something_optimal = true;
-                    optimal += 1;
+                    // optimal += 1;
                 }
             }
 
@@ -373,7 +373,7 @@ impl Compiler {
 
                 self.graph[target].qubit = Some(target_qubit);
 
-                allocs += 1;
+                // allocs += 1;
             }
         }
 
@@ -394,7 +394,7 @@ impl Compiler {
             )
         }
 
-        println!("Allocs: {allocs}, optimal: {optimal}");
+        // println!("Allocs: {allocs}, optimal: {optimal}");
 
         self.circuit
     }

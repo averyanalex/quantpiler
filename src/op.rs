@@ -1,7 +1,8 @@
 use std::{fmt::Display, str::FromStr};
 
-use egg::{define_language, Analysis, DidMerge, EGraph, Id, Rewrite};
-use num::BigUint;
+use egg::*;
+use itertools::Itertools;
+use num::{BigUint, FromPrimitive, One, Zero};
 
 use crate::extract::LpCostFunction;
 
@@ -36,7 +37,8 @@ define_language! {
         "+" = Add([Id; 2]),
         "-" = Sub([Id; 2]),
         "*" = Mul([Id; 2]),
-        "/" = Div([Id; 2]),
+        "//" = Div([Id; 2]),
+        "%" = Rem([Id; 2]),
         "==" = Eq([Id; 2]),
         "?" = Ternary([Id; 3]),
         Constant(BigUint),
@@ -62,13 +64,43 @@ impl Analysis<Op> for OpAnalyzer {
         let make_value = || {
             let x = |i: &Id| egraph[*i].data.value.clone();
             match enode {
+                Op::Not(a) => Some({
+                    let digits = x(a)?.iter_u64_digits().map(|d| !d).collect_vec();
+                    assert_eq!(digits.len(), 1);
+                    BigUint::from_u64(!digits[0]).unwrap()
+                }),
                 Op::Xor([a, b]) => Some(x(a)? ^ x(b)?),
                 Op::Or([a, b]) => Some(x(a)? | x(b)?),
                 Op::And([a, b]) => Some(x(a)? & x(b)?),
                 Op::Shr([target, distance]) => {
                     Some(x(target)? >> u128::try_from(x(distance)?).unwrap())
                 }
-                _ => None,
+                Op::Shl([target, distance]) => {
+                    Some(x(target)? << u128::try_from(x(distance)?).unwrap())
+                }
+                Op::Add([a, b]) => Some(x(a)? + x(b)?),
+                Op::Sub([a, b]) => Some(x(a)? - x(b)?),
+                Op::Mul([a, b]) => Some(x(a)? * x(b)?),
+                Op::Div([a, b]) => Some(x(a)? / x(b)?),
+                Op::Rem([a, b]) => Some(x(a)? % x(b)?),
+                Op::Eq([a, b]) => Some({
+                    if x(a)? == x(b)? {
+                        BigUint::one()
+                    } else {
+                        BigUint::zero()
+                    }
+                }),
+                Op::Ternary([cond, then, or]) => Some({
+                    if x(cond)?.is_one() {
+                        x(then)?
+                    } else if x(cond)?.is_zero() {
+                        x(or)?
+                    } else {
+                        panic!("expected condition to be 1 or 0, got {}", x(cond)?)
+                    }
+                }),
+                Op::Constant(c) => Some(c.clone()),
+                Op::Argument(_) => None,
             }
         };
 
@@ -90,15 +122,27 @@ pub fn make_rules() -> Vec<Rewrite<Op, OpAnalyzer>> {
     vec![
         // Commutable
         rw!("comm-xor"; "(^ ?a ?b)" => "(^ ?b ?a)"),
+        rw!("comm-or"; "(| ?a ?b)" => "(| ?b ?a)"),
         rw!("comm-and"; "(& ?a ?b)" => "(& ?b ?a)"),
+        rw!("comm-add"; "(+ ?a ?b)" => "(+ ?b ?a)"),
+        rw!("comm-mul"; "(* ?a ?b)" => "(* ?b ?a)"),
+        rw!("comm-eq"; "(== ?a ?b)" => "(== ?b ?a)"),
         // Associative
         rw!("assoc-xor"; "(^ ?a (^ ?b ?c))" => "(^ (^ ?a ?b) ?c)"),
+        rw!("assoc-or"; "(| ?a (| ?b ?c))" => "(| (| ?a ?b) ?c)"),
         rw!("assoc-and"; "(& ?a (& ?b ?c))" => "(& (& ?a ?b) ?c)"),
+        rw!("assoc-add"; "(+ ?a (+ ?b ?c))" => "(+ (+ ?a ?b) ?c)"),
+        rw!("assoc-mul"; "(* ?a (* ?b ?c))" => "(* (* ?a ?b) ?c)"),
         // Same elements logic
+        rw!("xor-same"; "(^ ?a ?a)" => "0"),
+        // rw!("xor-same-not"; "(^ (! ?a) ?a)" => "1111"),
+        rw!("or-same"; "(| ?a ?a)" => "?a"),
+        // rw!("or-same-not"; "(| (! ?a) ?a)" => "1111"),
         rw!("and-same"; "(& ?a ?a)" => "?a"),
         rw!("and-same-not"; "(& (! ?a) ?a)" => "0"),
-        rw!("xor-same"; "(^ ?a ?a)" => "0"),
         // Etc
+        rw!("a-mul2-a-add-a"; "(* ?a 2)" => "(+ ?a ?a)"),
+        rw!("a-add-a-a-mul2"; "(+ ?a ?a)" => "(* ?a 2)"),
         rw!("cancel-not"; "(! (! ?a))" => "?a"),
         rw!("xor-not-not-xor"; "(^ (! ?a) ?b)" => "(! (^ ?a ?b))"),
         rw!("cancel-xor-not-not"; "(^ (! ?a) (! ?b))" => "(^ ?a ?b)"),
@@ -118,9 +162,10 @@ impl LpCostFunction<Op, OpAnalyzer> for OpCost {
             Op::Shr(_) => 0.5,
             Op::Shl(_) => 0.5,
             Op::Add(_) => 16.0,
-            Op::Sub(_) => 16.0,
+            Op::Sub(_) => 18.0,
             Op::Mul(_) => 32.0,
             Op::Div(_) => 32.0,
+            Op::Rem(_) => 24.0,
             Op::Eq(_) => 32.0,
             Op::Ternary(_) => 8.0,
             Op::Constant(_) => 0.1,

@@ -2,9 +2,9 @@ use std::{fmt::Display, iter, str::FromStr};
 
 use egg::*;
 use itertools::Itertools;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{op::Op, extract::LpCostFunction};
+use crate::{extract::LpCostFunction, op::Op};
 
 define_language! {
     pub enum Logic {
@@ -20,6 +20,113 @@ define_language! {
         Const(bool),
         // argument qubit
         Arg(ArgInfo),
+    }
+}
+
+impl Logic {
+    fn optimize(&self, egraph: &EGraph<Logic, LogicConstantFolding>) -> Self {
+        match self {
+            Logic::Xor(args) => {
+                let mut powerful_xor_args = FxHashSet::default();
+                fn collect_xor_args(
+                    args: &[Id],
+                    egraph: &EGraph<Logic, LogicConstantFolding>,
+                    powerful_xor_args: &mut FxHashSet<Id>,
+                ) {
+                    for arg in args.iter() {
+                        match &egraph[*arg].data.optimized {
+                            Logic::Xor(args) => collect_xor_args(args, egraph, powerful_xor_args),
+                            _ => {
+                                if powerful_xor_args.contains(arg) {
+                                    powerful_xor_args.remove(arg);
+                                } else {
+                                    powerful_xor_args.insert(*arg);
+                                }
+                            }
+                        }
+                    }
+                }
+                collect_xor_args(args, egraph, &mut powerful_xor_args);
+
+                if powerful_xor_args.is_empty() {
+                    Logic::Const(false)
+                } else if powerful_xor_args.len() == 1 {
+                    egraph[powerful_xor_args.into_iter().next().unwrap()]
+                        .data
+                        .optimized
+                        .clone()
+                } else {
+                    Logic::Xor(powerful_xor_args.into_iter().collect())
+                }
+            }
+            Logic::And(args) => {
+                let logic_args = args
+                    .iter()
+                    .map(|a| egraph[*a].data.optimized.clone())
+                    .collect_vec();
+
+                if logic_args.iter().any(|l| {
+                    if let Logic::Const(constant) = l {
+                        !constant
+                    } else {
+                        false
+                    }
+                }) {
+                    Logic::Const(false)
+                } else {
+                    let mut unique_and_args = FxHashSet::default();
+                    fn collect_and_args(
+                        parent: Option<Id>,
+                        args: &[Id],
+                        egraph: &EGraph<Logic, LogicConstantFolding>,
+                        unique_and_args: &mut FxHashSet<Id>,
+                    ) -> Option<()> {
+                        for arg in args.iter() {
+                            match &egraph[*arg].data.optimized {
+                                Logic::And(inner_args) => {
+                                    if inner_args.iter().any(|a| Some(*a) == parent) {
+                                        // panic!("infinite recursion detected");
+                                        return None;
+                                    }
+
+                                    collect_and_args(
+                                        Some(*arg),
+                                        inner_args,
+                                        egraph,
+                                        unique_and_args,
+                                    )?;
+                                }
+                                _ => {
+                                    unique_and_args.insert(*arg);
+                                }
+                            }
+                        }
+                        Some(())
+                    }
+
+                    if collect_and_args(None, args, egraph, &mut unique_and_args).is_some() {
+                        if unique_and_args.is_empty() {
+                            Logic::Const(false)
+                        } else if unique_and_args.len() == 1 {
+                            egraph[unique_and_args.into_iter().next().unwrap()]
+                                .data
+                                .optimized
+                                .clone()
+                        } else {
+                            Logic::And(unique_and_args.into_iter().collect())
+                        }
+                    } else {
+                        self.clone()
+                    }
+                }
+            }
+            Logic::Not(arg) => match egraph[*arg].data.optimized {
+                Logic::Not(arg_in_not) => egraph[arg_in_not].data.optimized.clone(),
+                Logic::Const(constant) => Logic::Const(!constant),
+                _ => self.clone(),
+            },
+            Logic::Register(_) | Logic::Const(_) | Logic::Arg(_) => self.clone(),
+        }
     }
 }
 
@@ -76,59 +183,55 @@ fn make_rules() -> Vec<Rewrite<Logic, LogicConstantFolding>> {
     ]
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct LogicFoldingData {
+    value: Option<bool>,
+    optimized: Logic,
+}
+
 #[derive(Default)]
 struct LogicConstantFolding;
 impl Analysis<Logic> for LogicConstantFolding {
-    type Data = Option<bool>;
+    type Data = LogicFoldingData;
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
         egg::merge_max(to, from)
     }
 
     fn make(egraph: &EGraph<Logic, Self>, enode: &Logic) -> Self::Data {
-        let x = |i: &Id| egraph[*i].data;
-        match enode {
+        let xc = |i: &Id| egraph[*i].data.value;
+
+        let make_value = || match enode {
             Logic::Xor(args) => args
                 .iter()
-                .map(|arg| x(arg))
+                .map(|arg| xc(arg))
                 .fold_options(false, |acc, arg| acc ^ arg),
             Logic::And(args) => args
                 .iter()
-                .map(|arg| x(arg))
+                .map(|arg| xc(arg))
                 .fold_options(true, |acc, arg| acc & arg),
-            Logic::Not(a) => Some(!x(a)?),
+            Logic::Not(a) => Some(!xc(a)?),
             Logic::Const(a) => Some(*a),
-            _ => None,
-        }
+            Logic::Register(_) | Logic::Arg(_) => None,
+        };
+
+        let value = make_value();
+        let optimized = enode.optimize(egraph);
+
+        LogicFoldingData { value, optimized }
     }
 
     fn modify(egraph: &mut EGraph<Logic, Self>, id: Id) {
-        if let Some(i) = egraph[id].data {
+        if let Some(i) = egraph[id].data.value {
             let added = egraph.add(Logic::Const(i));
             egraph.union(id, added);
         }
+        let added = egraph.add(egraph[id].data.optimized.clone());
+        egraph.union(id, added);
     }
 }
 
 pub struct XorMinimizerCost;
-
-// impl CostFunction<Logic> for XorMinimizerCost {
-//     type Cost = usize;
-
-//     fn cost<C>(&mut self, enode: &Logic, mut costs: C) -> Self::Cost
-//     where
-//         C: FnMut(Id) -> Self::Cost,
-//     {
-//         match enode {
-//             Logic::Xor(..) => enode.fold(16, |sum, i| sum.saturating_add(costs(i))),
-//             Logic::And(..) => enode.fold(4, |sum, i| sum.saturating_add(costs(i))),
-//             Logic::Not(..) => enode.fold(1, |sum, i| sum.saturating_add(costs(i))),
-//             Logic::Register(..) => enode.fold(0, |sum, i| sum.saturating_add(costs(i))),
-//             Logic::Const(..) => 0,
-//             Logic::Arg(..) => 0,
-//         }
-//     }
-// }
 
 impl LpCostFunction<Logic, LogicConstantFolding> for XorMinimizerCost {
     fn node_cost(
@@ -185,17 +288,17 @@ impl Logificator {
 
         let expr = crate::extract::extract(&runner.egraph, runner.roots[0], XorMinimizerCost);
 
-        let xors = expr
-            .as_ref()
-            .iter()
-            .filter(|b| matches!(b, Logic::Xor(..)))
-            .count();
+        // let xors = expr
+        //     .as_ref()
+        //     .iter()
+        //     .filter(|b| matches!(b, Logic::Xor(..)))
+        //     .count();
 
-        println!("Simplified to len {}, xors: {}", expr.as_ref().len(), xors);
+        // println!("Simplified to len {}, xors: {}", expr.as_ref().len(), xors);
 
         let mut gr = EGraph::new(());
         gr.add_expr(&expr);
-        gr.dot().to_dot("bits.dot").unwrap();
+        // gr.dot().to_dot("bits.dot").unwrap();
 
         expr
     }

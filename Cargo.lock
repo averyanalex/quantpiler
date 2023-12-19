@@ -624,7 +624,7 @@ dependencies = [
 
 [[package]]
 name = "quantpiler"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "egg",
  "egraph-serialize",

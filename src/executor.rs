@@ -41,7 +41,7 @@ pub fn execute_op(op: &RecExpr<Op>, args: &FxHashMap<String, BigUint>) -> BigUin
             Op::Not(arg) => {
                 let digits = done[arg].iter_u64_digits().map(|d| !d).collect_vec();
                 assert_eq!(digits.len(), 1);
-                BigUint::from_u64(digits[0]).unwrap()
+                BigUint::from_u64(!digits[0]).unwrap()
             }
             Op::Xor([a, b]) => done[a].clone() ^ done[b].clone(),
             Op::Or([a, b]) => done[a].clone() | done[b].clone(),
@@ -52,6 +52,7 @@ pub fn execute_op(op: &RecExpr<Op>, args: &FxHashMap<String, BigUint>) -> BigUin
             Op::Sub([a, b]) => done[a].clone() - done[b].clone(),
             Op::Mul([a, b]) => done[a].clone() * done[b].clone(),
             Op::Div([a, b]) => done[a].clone() / done[b].clone(),
+            Op::Rem([a, b]) => done[a].clone() % done[b].clone(),
             Op::Eq([a, b]) => {
                 if done[a] == done[b] {
                     BigUint::one()

@@ -138,6 +138,7 @@ impl_op! {Sub, sub, Sub}
 
 impl_op! {Mul, mul, Mul}
 impl_op! {Div, div, Div}
+impl_op! {Rem, rem, Rem}
 
 #[cfg(feature = "python")]
 #[pyclass]
@@ -226,7 +227,11 @@ impl Expr {
         Self(self.0.clone() * rhs.into_expression(self))
     }
 
-    fn __divmod__(&self, rhs: RhsTypes) -> Self {
+    fn __floordiv__(&self, rhs: RhsTypes) -> Self {
         Self(self.0.clone() / rhs.into_expression(self))
+    }
+
+    fn __mod__(&self, rhs: RhsTypes) -> Self {
+        Self(self.0.clone() % rhs.into_expression(self))
     }
 }

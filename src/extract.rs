@@ -1,13 +1,12 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
 use egg::{Analysis, EGraph, Id, Language, RecExpr};
-use egraph_serialize::{ClassId, Node, NodeId};
+use egraph_serialize::{ClassId, NodeId};
 use good_lp::{
     constraint, solvers::highs::HighsParallelType, variable, Expression, ProblemVariables,
     Solution, SolverModel, Variable,
 };
 use indexmap::IndexMap;
-use rustc_hash::FxHashMap;
 
 use indexmap::IndexSet;
 use ordered_float::NotNan;
@@ -21,10 +20,9 @@ pub trait LpCostFunction<L: Language, N: Analysis<L>> {
 }
 
 // Most of this code was taken from https://github.com/egraphs-good/extraction-gym/tree/main
-pub type Cost = NotNan<f64>;
-pub const INFINITY: Cost = unsafe { NotNan::new_unchecked(std::f64::INFINITY) };
+type Cost = NotNan<f64>;
 
-pub trait Extractor: Sync {
+trait Extractor: Sync {
     fn extract(&self, egraph: &egraph_serialize::EGraph, roots: &[ClassId]) -> ExtractionResult;
 
     fn boxed(self) -> Box<dyn Extractor>
@@ -35,39 +33,8 @@ pub trait Extractor: Sync {
     }
 }
 
-pub trait MapGet<K, V> {
-    fn get(&self, key: &K) -> Option<&V>;
-}
-
-impl<K, V> MapGet<K, V> for HashMap<K, V>
-where
-    K: Eq + std::hash::Hash,
-{
-    fn get(&self, key: &K) -> Option<&V> {
-        HashMap::get(self, key)
-    }
-}
-
-impl<K, V> MapGet<K, V> for FxHashMap<K, V>
-where
-    K: Eq + std::hash::Hash,
-{
-    fn get(&self, key: &K) -> Option<&V> {
-        FxHashMap::get(self, key)
-    }
-}
-
-impl<K, V> MapGet<K, V> for IndexMap<K, V>
-where
-    K: Eq + std::hash::Hash,
-{
-    fn get(&self, key: &K) -> Option<&V> {
-        IndexMap::get(self, key)
-    }
-}
-
 #[derive(Default, Clone)]
-pub struct ExtractionResult {
+struct ExtractionResult {
     pub choices: IndexMap<ClassId, NodeId>,
 }
 
@@ -78,15 +45,11 @@ enum Status {
 }
 
 impl ExtractionResult {
-    pub fn choose(&mut self, class_id: ClassId, node_id: NodeId) {
+    fn choose(&mut self, class_id: ClassId, node_id: NodeId) {
         self.choices.insert(class_id, node_id);
     }
 
-    pub fn find_cycles(
-        &self,
-        egraph: &egraph_serialize::EGraph,
-        roots: &[ClassId],
-    ) -> Vec<ClassId> {
+    fn find_cycles(&self, egraph: &egraph_serialize::EGraph, roots: &[ClassId]) -> Vec<ClassId> {
         // let mut status = vec![Status::Todo; egraph.classes().len()];
         let mut status = IndexMap::<ClassId, Status>::default();
         let mut cycles = vec![];
@@ -118,72 +81,6 @@ impl ExtractionResult {
                 status.insert(class_id.clone(), Status::Done);
             }
         }
-    }
-
-    pub fn tree_cost(&self, egraph: &egraph_serialize::EGraph, roots: &[ClassId]) -> Cost {
-        let node_roots = roots
-            .iter()
-            .map(|cid| self.choices[cid].clone())
-            .collect::<Vec<NodeId>>();
-        self.tree_cost_rec(egraph, &node_roots, &mut HashMap::new())
-    }
-
-    fn tree_cost_rec(
-        &self,
-        egraph: &egraph_serialize::EGraph,
-        roots: &[NodeId],
-        memo: &mut HashMap<NodeId, Cost>,
-    ) -> Cost {
-        let mut cost = Cost::default();
-        for root in roots {
-            if let Some(c) = memo.get(root) {
-                cost += *c;
-                continue;
-            }
-            let class = egraph.nid_to_cid(root);
-            let node = &egraph[&self.choices[class]];
-            let inner = node.cost + self.tree_cost_rec(egraph, &node.children, memo);
-            memo.insert(root.clone(), inner);
-            cost += inner;
-        }
-        cost
-    }
-
-    // this will loop if there are cycles
-    pub fn dag_cost(&self, egraph: &egraph_serialize::EGraph, roots: &[ClassId]) -> Cost {
-        let mut costs: IndexMap<ClassId, Cost> = IndexMap::new();
-        let mut todo: Vec<ClassId> = roots.to_vec();
-        while let Some(cid) = todo.pop() {
-            let node_id = &self.choices[&cid];
-            let node = &egraph[node_id];
-            if costs.insert(cid.clone(), node.cost).is_some() {
-                continue;
-            }
-            for child in &node.children {
-                todo.push(egraph.nid_to_cid(child).clone());
-            }
-        }
-        costs.values().sum()
-    }
-
-    pub fn node_sum_cost<M>(
-        &self,
-        egraph: &egraph_serialize::EGraph,
-        node: &Node,
-        costs: &M,
-    ) -> Cost
-    where
-        M: MapGet<ClassId, Cost>,
-    {
-        node.cost
-            + node
-                .children
-                .iter()
-                .map(|n| {
-                    let cid = egraph.nid_to_cid(n);
-                    costs.get(cid).unwrap_or(&INFINITY)
-                })
-                .sum::<Cost>()
     }
 }
 
