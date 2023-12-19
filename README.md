@@ -30,4 +30,4 @@ qc = quantpiler.circuit_to_qiskit(circ)
 
 qc.draw('mpl')
 ```
-![result](example.png)
+![Resulting circuit](https://raw.githubusercontent.com/averyanalex/quantpiler/main/example.png)

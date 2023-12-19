@@ -27,55 +27,55 @@ jobs:
           fail_ci_if_error: true
           files: lcov.info
 
-  # linux:
-  #   runs-on: ubuntu-latest
-  #   strategy:
-  #     matrix:
-  #       target: [x86_64, x86, aarch64, armv7, s390x, ppc64le]
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-python@v4
-  #       with:
-  #         python-version: "3.10"
-  #     - uses: actions-rust-lang/setup-rust-toolchain@v1
-  #     - uses: Swatinem/rust-cache@v2
-  #     - name: Build wheels
-  #       run: |
-  #         python -m venv .env
-  #         source .env/bin/activate
-  #         pip install maturin
-  #         maturin build --release --out dist --find-interpreter
-  #     - name: Upload wheels
-  #       uses: actions/upload-artifact@v3
-  #       with:
-  #         name: wheels
-  #         path: dist
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --find-interpreter
+          manylinux: "2_28"
+          before-script-linux: dnf install clang -y
+      - name: Upload wheels
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels
+          path: dist
 
-  # windows:
-  #   runs-on: windows-latest
-  #   strategy:
-  #     matrix:
-  #       target: [x64, x86]
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-python@v4
-  #       with:
-  #         python-version: "3.10"
-  #         architecture: ${{ matrix.target }}
-  #     - uses: actions-rust-lang/setup-rust-toolchain@v1
-  #     - uses: Swatinem/rust-cache@v2
-  #     - name: Build wheels
-  #       uses: PyO3/maturin-action@v1
-  #       with:
-  #         target: ${{ matrix.target }}
-  #         args: --release --out dist --find-interpreter
-  #         sccache: "true"
-  #         container: "off"
-  #     - name: Upload wheels
-  #       uses: actions/upload-artifact@v3
-  #       with:
-  #         name: wheels
-  #         path: dist
+  windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        target: [x64, x86]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          architecture: ${{ matrix.target }}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --find-interpreter
+          sccache: "true"
+      - name: Upload wheels
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels
+          path: dist
 
   # macos:
   #   runs-on: macos-latest
@@ -89,13 +89,14 @@ jobs:
   #         python-version: "3.10"
   #     - uses: actions-rust-lang/setup-rust-toolchain@v1
   #     - uses: Swatinem/rust-cache@v2
+  #     - name: Install clang
+  #       run: brew install llvm
   #     - name: Build wheels
   #       uses: PyO3/maturin-action@v1
   #       with:
   #         target: ${{ matrix.target }}
   #         args: --release --out dist --find-interpreter
   #         sccache: "true"
-  #         container: "off"
   #     - name: Upload wheels
   #       uses: actions/upload-artifact@v3
   #       with:
@@ -120,7 +121,7 @@ jobs:
   release-python:
     runs-on: ubuntu-latest
     if: "startsWith(github.ref, 'refs/tags/')"
-    needs: [test, sdist]
+    needs: [test, sdist, linux, windows]
     steps:
       - uses: actions/download-artifact@v3
         with:
