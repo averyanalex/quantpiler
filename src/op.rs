@@ -119,7 +119,7 @@ impl Analysis<Op> for OpAnalyzer {
 
 pub fn make_rules() -> Vec<Rewrite<Op, OpAnalyzer>> {
     use egg::rewrite as rw;
-    vec![
+    let mut rules = vec![
         // Commutable
         rw!("comm-xor"; "(^ ?a ?b)" => "(^ ?b ?a)"),
         rw!("comm-or"; "(| ?a ?b)" => "(| ?b ?a)"),
@@ -157,7 +157,14 @@ pub fn make_rules() -> Vec<Rewrite<Op, OpAnalyzer>> {
         rw!("not-xor-xor-not"; "(! (^ ?a ?b))" => "(^ (! ?a) ?b)"),
         rw!("create-mul-one"; "?a" => "(* ?a 1)"),
         rw!("merge-add-muls"; "(+ ?a (* ?a ?b))" => "(* ?a (+ 1 ?b))")
-    ]
+    ];
+
+    rules.append(&mut vec![
+        // Distributivity
+        rw!("distr-mul-add"; "(* (+ ?a ?b) ?c)" <=> "(+ (* ?a ?c) (* ?b ?c))"),
+    ].concat());
+
+    rules
 }
 
 pub struct OpCost;
