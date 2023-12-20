@@ -1,3 +1,7 @@
+[![CI](https://github.com/averyanalex/quantpiler/actions/workflows/ci.yml/badge.svg)](https://github.com/averyanalex/quantpiler/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/averyanalex/quantpiler.svg)](https://opensource.org/license/agpl-v3)
+[![Version](https://img.shields.io/pypi/v/quantpiler.svg)](https://pypi.org/project/quantpiler/)
+
 # Сompiler of classical algorithms into oracles for quantum computing
 
 ## Achievements:
