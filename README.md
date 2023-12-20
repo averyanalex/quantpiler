@@ -19,17 +19,15 @@
 ```python
 import quantpiler
 
-x_len = 3
+x_len = 4
 x = quantpiler.argument("x", x_len)
 
-a = 5
+a = 6
 # N = 2**4
 
 prod = 1
 for i in range(x_len):
-    prod = ((x >> i) & 1).ternary(prod * a**(2**i), prod)
-
-prod = prod & 0b1111
+    prod = ((x >> i) & 1).ternary(prod * a**(2**i), prod) & 0b1111
 
 circ = prod.compile()
 qc = quantpiler.circuit_to_qiskit(circ)

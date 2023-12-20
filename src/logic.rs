@@ -81,6 +81,7 @@ impl Logic {
                     parents: &mut FxHashSet<Id>,
                 ) -> Option<()> {
                     for arg in args.iter() {
+                        parents.insert(*arg);
                         match &egraph[*arg].data.optimized {
                             Logic::And(inner_args) => {
                                 if inner_args.iter().any(|a| parents.contains(a)) {
@@ -180,6 +181,7 @@ fn make_rules() -> Vec<Rewrite<Logic, LogicConstantFolding>> {
         rw!("cancel-xor-not-not"; "(^ (! ?a) (! ?b))" => "(^ ?a ?b)"),
         // rw!("create-xor-not-not"; "(^ ?a ?b)" => "(^ (! ?a) (! ?b))"),
         rw!("not-xor-xor-not"; "(! (^ ?a ?b))" => "(^ (! ?a) ?b)"),
+        rw!("xor-aandb-aandnotb"; "(^ (& ?a ?b) (& ?a (! ?b)))" => "(?a)"),
     ]
 }
 

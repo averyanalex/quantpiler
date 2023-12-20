@@ -44,4 +44,6 @@ def circuit_to_qiskit(c: Circuit) -> qiskit.circuit.QuantumCircuit:
         for control in gate.controls:
             if control[1]:
                 qc.x(qubits[control[0].index])
+    
+    qc = qiskit.transpile(qc)
     return qc

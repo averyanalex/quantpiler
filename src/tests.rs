@@ -39,6 +39,20 @@ fn example() {
 }
 
 #[test]
+fn apowxmodn() {
+    let x_len = 3;
+    let x = Expression::new_argument("x", 3);
+
+    let a = 5u32;
+
+    let prod = (0..x_len).fold(x.constant(1u32), |acc, i| {
+        ((x.clone() >> i) & 1u32).ternary(acc.clone() * a.pow(2u32.pow(i)), acc) & 0b1111u32
+    });
+
+    compile(&prod);
+}
+
+#[test]
 fn add() {
     let a = Expression::new_argument("a", 32);
     compile(&(a.clone() + a.argument("b", 16)));
