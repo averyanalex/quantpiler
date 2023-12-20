@@ -457,7 +457,7 @@ impl Logificator {
                         }
                         bits
                     }
-                    _ => todo!(),
+                    _ => todo!("{op}"),
                 };
 
                 self.op_cache.insert(id, ids.clone());

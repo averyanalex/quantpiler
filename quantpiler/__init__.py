@@ -1,9 +1,8 @@
 from .quantpiler import *
 
-from qiskit.circuit import QuantumCircuit, Qubit, QuantumRegister
+import qiskit
 
-
-def circuit_to_qiskit(c: Circuit) -> QuantumCircuit:
+def circuit_to_qiskit(c: Circuit) -> qiskit.circuit.QuantumCircuit:
     qubits = []
     regs = []
     for qubit, qubit_descs in c.qubits_map_list():
@@ -11,12 +10,12 @@ def circuit_to_qiskit(c: Circuit) -> QuantumCircuit:
         for desc in qubit_descs:
             full_desc.append(f"{desc.reg.name()}_{desc.index}")
         full_desc.sort()
-        q = Qubit()
+        q = qiskit.circuit.Qubit()
         qubits.append(q)
-        reg = QuantumRegister(name="-".join(full_desc), bits=[q])
+        reg = qiskit.circuit.QuantumRegister(name="-".join(full_desc), bits=[q])
         regs.append(reg)
 
-    qc = QuantumCircuit(*regs)
+    qc = qiskit.circuit.QuantumCircuit(*regs)
 
     for gate in c.gates:
         controls = []

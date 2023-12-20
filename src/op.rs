@@ -140,6 +140,14 @@ pub fn make_rules() -> Vec<Rewrite<Op, OpAnalyzer>> {
         // rw!("or-same-not"; "(| (! ?a) ?a)" => "1111"),
         rw!("and-same"; "(& ?a ?a)" => "?a"),
         rw!("and-same-not"; "(& (! ?a) ?a)" => "0"),
+        // With constants
+        rw!("and-with-0"; "(& ?a 0)" => "0"),
+        rw!("or-with-0"; "(| ?a 0)" => "?a"),
+        rw!("xor-with-0"; "(^ ?a 0)" => "?a"),
+        rw!("add-with-0"; "(+ ?a 0)" => "?a"),
+        rw!("sub-with-0"; "(- ?a 0)" => "?a"),
+        rw!("mul-with-0"; "(* ?a 0)" => "0"),
+        rw!("mul-with-1"; "(* ?a 1)" => "?a"),
         // Etc
         rw!("a-mul2-a-add-a"; "(* ?a 2)" => "(+ ?a ?a)"),
         rw!("a-add-a-a-mul2"; "(+ ?a ?a)" => "(* ?a 2)"),
@@ -147,6 +155,8 @@ pub fn make_rules() -> Vec<Rewrite<Op, OpAnalyzer>> {
         rw!("xor-not-not-xor"; "(^ (! ?a) ?b)" => "(! (^ ?a ?b))"),
         rw!("cancel-xor-not-not"; "(^ (! ?a) (! ?b))" => "(^ ?a ?b)"),
         rw!("not-xor-xor-not"; "(! (^ ?a ?b))" => "(^ (! ?a) ?b)"),
+        rw!("create-mul-one"; "?a" => "(* ?a 1)"),
+        rw!("merge-add-muls"; "(+ ?a (* ?a ?b))" => "(* ?a (+ 1 ?b))")
     ]
 }
 

@@ -30,6 +30,7 @@ ordered-float = "3.9.2"
 
 [features]
 python = ["pyo3"]
+# default = ["python"]
 
 [profile.release]
 lto = "thin"

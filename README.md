@@ -19,8 +19,8 @@
 ```python
 import quantpiler
 
-a = quantpiler.Expr("a", 3)
-b = a.argument("b", 2)
+a = quantpiler.argument("a", 3)
+b = quantpiler.argument("b", 2)
 add = a + b
 xor = add ^ 0b100
 and_const = xor & 0b111

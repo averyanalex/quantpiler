@@ -1,3 +1,5 @@
+#[cfg(feature = "python")]
+use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 
 use egg::{EGraph, Id, RecExpr, Runner};
@@ -16,12 +18,18 @@ pub struct Expression {
 }
 
 impl Expression {
-    pub fn new<N: Into<String>>(name: N, size: u32) -> Self {
+    pub fn new_argument<N: Into<String>>(name: N, size: u32) -> Self {
         let egraph = Arc::new(Mutex::new(EGraph::new(OpAnalyzer)));
         let id = egraph.lock().unwrap().add(Op::Argument(ArgumentInfo {
             size,
             name: name.into(),
         }));
+        Self { id, egraph }
+    }
+
+    pub fn new_constant<T: Into<BigUint>>(value: T) -> Self {
+        let egraph = Arc::new(Mutex::new(EGraph::new(OpAnalyzer)));
+        let id = egraph.lock().unwrap().add(Op::Constant(value.into()));
         Self { id, egraph }
     }
 
@@ -57,7 +65,7 @@ impl Expression {
         }
     }
 
-    pub fn ternary<T: IntoId>(&self, then: T, or: T) -> Expression {
+    pub fn ternary<T1: IntoId, T2: IntoId>(&self, then: T1, or: T2) -> Expression {
         let then_id = then.id(&self.egraph);
         let or_id = or.id(&self.egraph);
 
@@ -141,6 +149,21 @@ impl_op! {Div, div, Div}
 impl_op! {Rem, rem, Rem}
 
 #[cfg(feature = "python")]
+static ZERO_EXPR: LazyLock<Expression> = LazyLock::new(|| Expression::new_constant(0u32));
+
+#[cfg(feature = "python")]
+#[pyfunction]
+pub fn argument(name: String, size: u32) -> Expr {
+    Expr(ZERO_EXPR.argument(name, size))
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+pub fn constant(value: u128) -> Expr {
+    Expr(ZERO_EXPR.constant(value))
+}
+
+#[cfg(feature = "python")]
 #[pyclass]
 #[derive(Clone)]
 pub struct Expr(Expression);
@@ -148,15 +171,15 @@ pub struct Expr(Expression);
 #[cfg(feature = "python")]
 #[derive(FromPyObject)]
 enum RhsTypes {
-    Const(u64),
+    Const(u128),
     Expr(Expr),
 }
 
 #[cfg(feature = "python")]
 impl RhsTypes {
-    fn into_expression(self, expr: &Expr) -> Expression {
+    fn expr(self) -> Expression {
         match self {
-            RhsTypes::Const(c) => expr.constant(c).0,
+            RhsTypes::Const(c) => ZERO_EXPR.constant(c),
             RhsTypes::Expr(e) => e.0,
         }
     }
@@ -165,24 +188,8 @@ impl RhsTypes {
 #[cfg(feature = "python")]
 #[pymethods]
 impl Expr {
-    #[new]
-    fn new(name: String, size: u32) -> Self {
-        Self(Expression::new(name, size))
-    }
-
-    fn argument(&self, name: String, size: u32) -> Self {
-        Self(self.0.argument(name, size))
-    }
-
-    fn constant(&self, value: u64) -> Self {
-        Self(self.0.constant(value))
-    }
-
     fn ternary(&self, then: RhsTypes, or: RhsTypes) -> Self {
-        Self(
-            self.0
-                .ternary(then.into_expression(self), or.into_expression(self)),
-        )
+        Self(self.0.ternary(then.expr(), or.expr()))
     }
 
     fn compile(&self) -> Circuit {
@@ -191,47 +198,141 @@ impl Expr {
         crate::compiler::Compiler::new(&logic).compile()
     }
 
+    fn __str__(&self) -> String {
+        let op = self.0.build();
+        op.to_string()
+    }
+
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
+
+    // fn __repr__(&self) -> String {
+    //     let op = self.0.build();
+    //     format!("{:?}", op)
+    // }
+
     fn __invert__(&self) -> Self {
         Self(!self.0.clone())
     }
 
     fn __xor__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() ^ rhs.into_expression(self))
+        Self(self.0.clone() ^ rhs.expr())
+    }
+
+    fn __rxor__(&self, rhs: RhsTypes) -> Self {
+        self.__xor__(rhs)
+    }
+
+    fn __ixor__(&mut self, rhs: RhsTypes) {
+        *self = self.__xor__(rhs);
     }
 
     fn __or__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() | rhs.into_expression(self))
+        Self(self.0.clone() | rhs.expr())
+    }
+
+    fn __ror__(&self, rhs: RhsTypes) -> Self {
+        self.__or__(rhs)
+    }
+
+    fn __ior__(&mut self, rhs: RhsTypes) {
+        *self = self.__or__(rhs);
     }
 
     fn __and__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() & rhs.into_expression(self))
+        Self(self.0.clone() & rhs.expr())
     }
 
-    fn __rshift__(&self, rhs: u32) -> Self {
+    fn __rand__(&self, rhs: RhsTypes) -> Self {
+        self.__and__(rhs)
+    }
+
+    fn __iand__(&mut self, rhs: RhsTypes) {
+        *self = self.__and__(rhs);
+    }
+
+    fn __rshift__(&self, rhs: u128) -> Self {
         Self(self.0.clone() >> rhs)
     }
 
-    fn __lshift__(&self, rhs: u32) -> Self {
+    fn __rrshift__(&self, rhs: u128) -> Self {
+        self.__rshift__(rhs)
+    }
+
+    fn __irshift__(&mut self, rhs: u128) {
+        *self = self.__rshift__(rhs);
+    }
+
+    fn __lshift__(&self, rhs: u128) -> Self {
         Self(self.0.clone() << rhs)
     }
 
+    fn __rlshift__(&self, rhs: u128) -> Self {
+        self.__lshift__(rhs)
+    }
+
+    fn __ilshift__(&mut self, rhs: u128) {
+        *self = self.__lshift__(rhs);
+    }
+
     fn __add__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() + rhs.into_expression(self))
+        Self(self.0.clone() + rhs.expr())
+    }
+
+    fn __radd__(&self, rhs: RhsTypes) -> Self {
+        self.__add__(rhs)
+    }
+
+    fn __iadd__(&mut self, rhs: RhsTypes) {
+        *self = self.__add__(rhs);
     }
 
     fn __sub__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() - rhs.into_expression(self))
+        Self(self.0.clone() - rhs.expr())
+    }
+
+    fn __rsub__(&self, rhs: RhsTypes) -> Self {
+        self.__sub__(rhs)
+    }
+
+    fn __isub__(&mut self, rhs: RhsTypes) {
+        *self = self.__sub__(rhs);
     }
 
     fn __mul__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() * rhs.into_expression(self))
+        Self(self.0.clone() * rhs.expr())
+    }
+
+    fn __rmul__(&self, rhs: RhsTypes) -> Self {
+        self.__mul__(rhs)
+    }
+
+    fn __imul__(&mut self, rhs: RhsTypes) {
+        *self = self.__mul__(rhs);
     }
 
     fn __floordiv__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() / rhs.into_expression(self))
+        Self(self.0.clone() / rhs.expr())
+    }
+
+    fn __rfloordiv__(&self, rhs: RhsTypes) -> Self {
+        self.__floordiv__(rhs)
+    }
+
+    fn __ifloordiv__(&mut self, rhs: RhsTypes) {
+        *self = self.__floordiv__(rhs);
     }
 
     fn __mod__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() % rhs.into_expression(self))
+        Self(self.0.clone() % rhs.expr())
+    }
+
+    fn __rmod__(&self, rhs: RhsTypes) -> Self {
+        self.__mod__(rhs)
+    }
+
+    fn __imod__(&mut self, rhs: RhsTypes) {
+        *self = self.__mod__(rhs);
     }
 }

@@ -1,4 +1,5 @@
 #![feature(let_chains)]
+#![feature(lazy_cell)]
 
 pub mod circuit;
 pub mod compiler;
@@ -19,5 +20,7 @@ use pyo3::prelude::*;
 fn quantpiler(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<expression::Expr>()?;
     m.add_class::<circuit::Circuit>()?;
+    m.add_wrapped(wrap_pyfunction!(expression::argument))?;
+    m.add_wrapped(wrap_pyfunction!(expression::constant))?;
     Ok(())
 }

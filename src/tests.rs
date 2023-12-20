@@ -62,7 +62,7 @@ fn test_expr(value: Expression) {
 fn crc32() {
     let size = 32;
 
-    let input = Expression::new("input", size);
+    let input = Expression::new_argument("input", size);
     let mut value = input.constant(0xFFFFFFFFu32);
 
     fn table(mut ch: Expression) -> Expression {
@@ -87,7 +87,7 @@ fn crc32() {
 
 #[test]
 fn example() {
-    let a = Expression::new("input", 3);
+    let a = Expression::new_argument("input", 3);
     let b = a.argument("b", 2);
     let add = a + b;
     let xor = add ^ 0b100u32;
@@ -98,13 +98,13 @@ fn example() {
 
 #[test]
 fn add() {
-    let a = Expression::new("a", 32);
+    let a = Expression::new_argument("a", 32);
     test_expr(a.clone() + a.argument("b", 16));
 }
 
 #[test]
 fn many_add() {
-    let a = Expression::new("a", 32);
+    let a = Expression::new_argument("a", 32);
     test_expr(
         a.clone()
             + a.argument("b", 20)
@@ -116,13 +116,13 @@ fn many_add() {
 
 #[test]
 fn and() {
-    let a = Expression::new("a", 32);
+    let a = Expression::new_argument("a", 32);
     test_expr(a.clone() & a.argument("b", 16));
 }
 
 #[test]
 fn many_and() {
-    let a = Expression::new("a", 32);
+    let a = Expression::new_argument("a", 32);
     test_expr(
         a.clone()
             & a.argument("b", 20)
@@ -134,13 +134,13 @@ fn many_and() {
 
 #[test]
 fn or() {
-    let a = Expression::new("a", 32);
+    let a = Expression::new_argument("a", 32);
     test_expr(a.clone() | a.argument("b", 16));
 }
 
 #[test]
 fn many_or() {
-    let a = Expression::new("a", 32);
+    let a = Expression::new_argument("a", 32);
     test_expr(
         a.clone()
             | a.argument("b", 20)
@@ -152,13 +152,13 @@ fn many_or() {
 
 #[test]
 fn xor() {
-    let a = Expression::new("a", 32);
+    let a = Expression::new_argument("a", 32);
     test_expr(a.clone() ^ a.argument("b", 16));
 }
 
 #[test]
 fn many_xor() {
-    let a = Expression::new("a", 32);
+    let a = Expression::new_argument("a", 32);
     test_expr(
         a.clone()
             ^ a.argument("b", 20)
