@@ -79,7 +79,7 @@ impl Compiler {
             }
         }
 
-        // dbg!(dot::Dot::with_config(&graph, &[dot::Config::EdgeNoLabel]));
+        // dbg!(petgraph::dot::Dot::with_config(&graph, &[petgraph::dot::Config::EdgeNoLabel]));
 
         Self {
             circuit,

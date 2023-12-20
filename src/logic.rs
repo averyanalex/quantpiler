@@ -346,8 +346,8 @@ impl Logificator {
         let mut runner = Runner::default()
             .with_egraph(self.egraph)
             .with_time_limit(std::time::Duration::from_secs(3600))
-            .with_node_limit(1200)
-            .with_iter_limit(20);
+            .with_node_limit(10000)
+            .with_iter_limit(50);
         runner.roots.push(return_id);
 
         runner = runner.run(&make_rules());

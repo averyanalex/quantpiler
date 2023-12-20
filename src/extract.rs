@@ -236,12 +236,12 @@ impl Extractor for CbcExtractor {
         let mut result = ExtractionResult::default();
 
         for (id, var) in &vars {
-            let active = solution.value(var.active) > 0.0;
+            let active = (solution.value(var.active) - 1.0).abs() < 0.1;
             if active {
                 let node_idx = var
                     .nodes
                     .iter()
-                    .position(|&n| solution.value(n) > 0.0)
+                    .position(|&n| (solution.value(n) - 1.0).abs() < 0.1)
                     .unwrap();
                 let node_id = egraph[id].nodes[node_idx].clone();
                 result.choose(id.clone(), node_id);
