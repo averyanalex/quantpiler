@@ -23,7 +23,7 @@
       in {
         devShells = {
           default = pkgs.mkShell {
-            buildInputs = [rust pkgs.cbc pkgs.cmake];
+            buildInputs = [rust pkgs.cmake];
             LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
             shellHook = with pkgs; ''
               export BINDGEN_EXTRA_CLANG_ARGS="$(< ${stdenv.cc}/nix-support/libc-crt1-cflags) \
