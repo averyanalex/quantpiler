@@ -19,15 +19,21 @@
 ```python
 import quantpiler
 
-a = quantpiler.argument("a", 3)
-b = quantpiler.argument("b", 2)
-add = a + b
-xor = add ^ 0b100
-and_const = xor & 0b111
+x_len = 3
+x = quantpiler.argument("x", x_len)
 
-circ = and_const.compile()
+a = 5
+# N = 2**4
+
+prod = 1
+for i in range(x_len):
+    prod = ((x >> i) & 1).ternary(prod * a**(2**i), prod)
+
+prod = prod & 0b1111
+
+circ = prod.compile()
 qc = quantpiler.circuit_to_qiskit(circ)
 
-qc.draw('mpl')
+qc.draw("mpl")
 ```
 ![Resulting circuit](https://raw.githubusercontent.com/averyanalex/quantpiler/main/example.png)

@@ -3,19 +3,33 @@ from .quantpiler import *
 import qiskit
 
 def circuit_to_qiskit(c: Circuit) -> qiskit.circuit.QuantumCircuit:
-    qubits = []
-    regs = []
+    qubits = {}
+    args = []
+    ancs = []
+    rets = []
     for qubit, qubit_descs in c.qubits_map_list():
         full_desc = []
         for desc in qubit_descs:
             full_desc.append(f"{desc.reg.name()}_{desc.index}")
         full_desc.sort()
         q = qiskit.circuit.Qubit()
-        qubits.append(q)
-        reg = qiskit.circuit.QuantumRegister(name="-".join(full_desc), bits=[q])
-        regs.append(reg)
+        qubits[qubit.index] = q
 
-    qc = qiskit.circuit.QuantumCircuit(*regs)
+        reg_name = "-".join(full_desc)
+        reg = qiskit.circuit.QuantumRegister(name=reg_name, bits=[q])
+
+        if "ret" in reg_name:
+            rets.append(reg)
+        elif "anc" in reg_name:
+            ancs.append(reg)
+        else:
+            args.append(reg)
+    
+    args.sort(key=lambda r: r.name)
+    ancs.sort(key=lambda r: r.name)
+    rets.sort(key=lambda r: r.name)
+
+    qc = qiskit.circuit.QuantumCircuit(*(args + ancs + rets))
 
     for gate in c.gates:
         controls = []
