@@ -8,6 +8,17 @@ pub mod expression;
 pub mod extract;
 pub mod logic;
 pub mod op;
+mod verify;
+
+pub fn compile(expr: &expression::Expression) -> circuit::Circuit {
+    let op = expr.build();
+    let logic = logic::Logificator::new(op.clone()).build_logic();
+    let circuit = compiler::Compiler::new(&logic).compile();
+
+    verify::verify(&op, &logic, &circuit);
+
+    circuit
+}
 
 #[cfg(test)]
 mod tests;

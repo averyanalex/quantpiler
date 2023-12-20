@@ -27,105 +27,105 @@ impl Logic {
     fn optimize(&self, egraph: &EGraph<Logic, LogicConstantFolding>) -> Self {
         match self {
             Logic::Xor(args) => {
+                assert!(!args.is_empty());
+
                 let mut powerful_xor_args = FxHashSet::default();
+                let mut parents = FxHashSet::default();
                 fn collect_xor_args(
                     args: &[Id],
-                    egraph: &EGraph<Logic, LogicConstantFolding>,
+                    _egraph: &EGraph<Logic, LogicConstantFolding>,
                     powerful_xor_args: &mut FxHashSet<Id>,
-                ) {
+                    parents: &mut FxHashSet<Id>,
+                ) -> Option<()> {
                     for arg in args.iter() {
-                        match &egraph[*arg].data.optimized {
-                            Logic::Xor(args) => collect_xor_args(args, egraph, powerful_xor_args),
-                            _ => {
-                                if powerful_xor_args.contains(arg) {
-                                    powerful_xor_args.remove(arg);
-                                } else {
-                                    powerful_xor_args.insert(*arg);
-                                }
-                            }
+                        parents.insert(*arg);
+                        // if let Logic::Xor(inner_args) = &egraph[*arg].data.optimized {
+                        //     if inner_args.iter().any(|a| parents.contains(a)) {
+                        //         // panic!("infinite recursion detected");
+                        //         return None;
+                        //     }
+                        //     collect_xor_args(inner_args, egraph, powerful_xor_args, parents);
+                        // } else if powerful_xor_args.contains(arg) {
+                        if powerful_xor_args.contains(arg) {
+                            powerful_xor_args.remove(arg);
+                        } else {
+                            powerful_xor_args.insert(*arg);
                         }
                     }
+                    Some(())
                 }
-                collect_xor_args(args, egraph, &mut powerful_xor_args);
-
-                if powerful_xor_args.is_empty() {
-                    Logic::Const(false)
-                } else if powerful_xor_args.len() == 1 {
-                    egraph[powerful_xor_args.into_iter().next().unwrap()]
-                        .data
-                        .optimized
-                        .clone()
+                if collect_xor_args(args, egraph, &mut powerful_xor_args, &mut parents).is_some() {
+                    if powerful_xor_args.is_empty() {
+                        Logic::Const(false)
+                    } else if powerful_xor_args.len() == 1 {
+                        egraph[powerful_xor_args.into_iter().next().unwrap()]
+                            .data
+                            .optimized
+                            .clone()
+                    } else {
+                        Logic::Xor(powerful_xor_args.into_iter().collect())
+                    }
                 } else {
-                    Logic::Xor(powerful_xor_args.into_iter().collect())
+                    self.clone()
                 }
             }
             Logic::And(args) => {
-                let logic_args = args
-                    .iter()
-                    .map(|a| egraph[*a].data.optimized.clone())
-                    .collect_vec();
+                assert!(!args.is_empty());
 
-                if logic_args.iter().any(|l| {
-                    if let Logic::Const(constant) = l {
-                        !constant
-                    } else {
-                        false
-                    }
-                }) {
-                    Logic::Const(false)
-                } else {
-                    let mut unique_and_args = FxHashSet::default();
-                    fn collect_and_args(
-                        parent: Option<Id>,
-                        args: &[Id],
-                        egraph: &EGraph<Logic, LogicConstantFolding>,
-                        unique_and_args: &mut FxHashSet<Id>,
-                    ) -> Option<()> {
-                        for arg in args.iter() {
-                            match &egraph[*arg].data.optimized {
-                                Logic::And(inner_args) => {
-                                    if inner_args.iter().any(|a| Some(*a) == parent) {
-                                        // panic!("infinite recursion detected");
-                                        return None;
-                                    }
+                let mut unique_and_args = FxHashSet::default();
+                let mut parents = FxHashSet::default();
+                fn collect_and_args(
+                    args: &[Id],
+                    egraph: &EGraph<Logic, LogicConstantFolding>,
+                    unique_and_args: &mut FxHashSet<Id>,
+                    parents: &mut FxHashSet<Id>,
+                ) -> Option<()> {
+                    for arg in args.iter() {
+                        match &egraph[*arg].data.optimized {
+                            Logic::And(inner_args) => {
+                                if inner_args.iter().any(|a| parents.contains(a)) {
+                                    // panic!("infinite recursion detected");
+                                    return None;
+                                }
 
-                                    collect_and_args(
-                                        Some(*arg),
-                                        inner_args,
-                                        egraph,
-                                        unique_and_args,
-                                    )?;
-                                }
-                                _ => {
-                                    unique_and_args.insert(*arg);
-                                }
+                                collect_and_args(inner_args, egraph, unique_and_args, parents)?;
+                            }
+                            Logic::Const(true) => {}
+                            _ => {
+                                unique_and_args.insert(*arg);
                             }
                         }
-                        Some(())
                     }
+                    Some(())
+                }
 
-                    if collect_and_args(None, args, egraph, &mut unique_and_args).is_some() {
-                        if unique_and_args.is_empty() {
-                            Logic::Const(false)
-                        } else if unique_and_args.len() == 1 {
-                            egraph[unique_and_args.into_iter().next().unwrap()]
-                                .data
-                                .optimized
-                                .clone()
-                        } else {
-                            Logic::And(unique_and_args.into_iter().collect())
-                        }
+                if collect_and_args(args, egraph, &mut unique_and_args, &mut parents).is_some() {
+                    if unique_and_args.is_empty() {
+                        // the only arg was in and is true
+                        Logic::Const(true)
+                    } else if unique_and_args.len() == 1 {
+                        egraph[unique_and_args.into_iter().next().unwrap()]
+                            .data
+                            .optimized
+                            .clone()
+                    } else if unique_and_args
+                        .iter()
+                        .any(|a| egraph[*a].data.optimized == Logic::Const(false))
+                    {
+                        Logic::Const(false)
                     } else {
-                        self.clone()
+                        Logic::And(unique_and_args.into_iter().collect())
                     }
+                } else {
+                    self.clone()
                 }
             }
-            Logic::Not(arg) => match egraph[*arg].data.optimized {
+            Logic::Not(arg) => match egraph[*arg].data.optimized.clone() {
                 Logic::Not(arg_in_not) => egraph[arg_in_not].data.optimized.clone(),
                 Logic::Const(constant) => Logic::Const(!constant),
                 _ => self.clone(),
             },
-            Logic::Register(_) | Logic::Const(_) | Logic::Arg(_) => self.clone(),
+            _ => self.clone(),
         }
     }
 }
@@ -215,8 +215,16 @@ impl Analysis<Logic> for LogicConstantFolding {
             Logic::Register(_) | Logic::Arg(_) => None,
         };
 
-        let value = make_value();
+        let mut value = make_value();
         let optimized = enode.optimize(egraph);
+
+        if let Logic::Const(c) = &optimized {
+            if let Some(v) = value {
+                assert_eq!(v, *c);
+            } else {
+                value = Some(*c)
+            }
+        }
 
         LogicFoldingData { value, optimized }
     }
@@ -261,6 +269,64 @@ pub struct Logificator {
     egraph: EGraph<Logic, LogicConstantFolding>,
     op_expr: RecExpr<Op>,
     op_cache: FxHashMap<Id, Vec<Id>>,
+}
+
+fn build_add(egraph: &mut EGraph<Logic, LogicConstantFolding>, a: &[Id], b: &[Id]) -> Vec<Id> {
+    let mut c = None;
+
+    let mut bits = a
+        .iter()
+        .zip_longest(b.iter())
+        .map(|ab| match ab {
+            itertools::EitherOrBoth::Both(a, b) => {
+                let a_xor_b = egraph.add(Logic::Xor(Box::new([*a, *b])));
+                let a_and_b = egraph.add(Logic::And(Box::new([*a, *b])));
+                if let Some(cin) = c {
+                    let cin_and_axorb = egraph.add(Logic::And(Box::new([cin, a_xor_b])));
+                    c = Some(egraph.add(Logic::Xor(Box::new([a_and_b, cin_and_axorb]))));
+                    egraph.add(Logic::Xor(Box::new([a_xor_b, cin])))
+                } else {
+                    c = Some(a_and_b);
+                    a_xor_b
+                }
+            }
+            itertools::EitherOrBoth::Left(a) => {
+                if let Some(cin) = c {
+                    c = Some(egraph.add(Logic::And(Box::new([cin, *a]))));
+                    egraph.add(Logic::Xor(Box::new([cin, *a])))
+                } else {
+                    *a
+                }
+            }
+            itertools::EitherOrBoth::Right(b) => {
+                if let Some(cin) = c {
+                    c = Some(egraph.add(Logic::And(Box::new([cin, *b]))));
+                    egraph.add(Logic::Xor(Box::new([cin, *b])))
+                } else {
+                    *b
+                }
+            }
+        })
+        .collect_vec();
+    if let Some(c) = c {
+        bits.push(c)
+    }
+    bits
+}
+
+fn build_mul(egraph: &mut EGraph<Logic, LogicConstantFolding>, a: &[Id], b: &[Id]) -> Vec<Id> {
+    b.iter()
+        .enumerate()
+        .map(|(idx, b_bit)| {
+            iter::repeat(Logic::Const(false))
+                .take(idx)
+                .chain(a.iter().map(|a_bit| Logic::And(Box::new([*a_bit, *b_bit]))))
+                .map(|l| egraph.add(l))
+                .collect_vec()
+        })
+        .collect_vec()
+        .into_iter()
+        .fold(vec![], |acc, x| build_add(egraph, &acc, &x))
 }
 
 impl Logificator {
@@ -411,51 +477,14 @@ impl Logificator {
                             .collect()
                     }
                     Op::Add([a, b]) => {
-                        let mut c = None;
-                        let mut bits: Vec<_> = self
-                            .get_logificated(a)
-                            .into_iter()
-                            .zip_longest(self.get_logificated(b).into_iter())
-                            .map(|ab| match ab {
-                                itertools::EitherOrBoth::Both(a, b) => {
-                                    let a_xor_b = self.egraph.add(Logic::Xor(Box::new([a, b])));
-                                    let a_and_b = self.egraph.add(Logic::And(Box::new([a, b])));
-                                    if let Some(cin) = c {
-                                        let cin_and_axorb =
-                                            self.egraph.add(Logic::And(Box::new([cin, a_xor_b])));
-                                        c =
-                                            Some(self.egraph.add(Logic::Xor(Box::new([
-                                                a_and_b,
-                                                cin_and_axorb,
-                                            ]))));
-                                        self.egraph.add(Logic::Xor(Box::new([a_xor_b, cin])))
-                                    } else {
-                                        c = Some(a_and_b);
-                                        a_xor_b
-                                    }
-                                }
-                                itertools::EitherOrBoth::Left(a) => {
-                                    if let Some(cin) = c {
-                                        c = Some(self.egraph.add(Logic::And(Box::new([cin, a]))));
-                                        self.egraph.add(Logic::Xor(Box::new([cin, a])))
-                                    } else {
-                                        a
-                                    }
-                                }
-                                itertools::EitherOrBoth::Right(b) => {
-                                    if let Some(cin) = c {
-                                        c = Some(self.egraph.add(Logic::And(Box::new([cin, b]))));
-                                        self.egraph.add(Logic::Xor(Box::new([cin, b])))
-                                    } else {
-                                        b
-                                    }
-                                }
-                            })
-                            .collect();
-                        if let Some(c) = c {
-                            bits.push(c)
-                        }
-                        bits
+                        let a = self.get_logificated(a);
+                        let b = self.get_logificated(b);
+                        build_add(&mut self.egraph, &a, &b)
+                    }
+                    Op::Mul([a, b]) => {
+                        let a = self.get_logificated(a);
+                        let b = self.get_logificated(b);
+                        build_mul(&mut self.egraph, &a, &b)
                     }
                     _ => todo!("{op}"),
                 };

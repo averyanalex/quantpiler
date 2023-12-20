@@ -193,9 +193,7 @@ impl Expr {
     }
 
     fn compile(&self) -> Circuit {
-        let op = self.0.build();
-        let logic = crate::logic::Logificator::new(op).build_logic();
-        crate::compiler::Compiler::new(&logic).compile()
+        crate::compile(&self.0)
     }
 
     fn __str__(&self) -> String {
