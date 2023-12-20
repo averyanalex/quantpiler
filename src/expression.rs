@@ -2,7 +2,7 @@
 use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 
-use egg::{EGraph, Id, RecExpr, Runner};
+use egg::*;
 use num::BigUint;
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
@@ -203,6 +203,12 @@ impl Expr {
 
     fn __repr__(&self) -> String {
         self.__str__()
+    }
+
+    fn __len__(&self) -> usize {
+        let op = self.0.build();
+        let logic = crate::logic::Logificator::new(op).build_logic();
+        logic[Id::from(logic.as_ref().len() - 1)].children().len()
     }
 
     // fn __repr__(&self) -> String {

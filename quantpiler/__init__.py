@@ -2,6 +2,7 @@ from .quantpiler import *
 
 import qiskit
 
+
 def circuit_to_qiskit(c: Circuit) -> qiskit.circuit.QuantumCircuit:
     qubits = {}
     args = []
@@ -24,7 +25,7 @@ def circuit_to_qiskit(c: Circuit) -> qiskit.circuit.QuantumCircuit:
             ancs.append(reg)
         else:
             args.append(reg)
-    
+
     args.sort(key=lambda r: r.name)
     ancs.sort(key=lambda r: r.name)
     rets.sort(key=lambda r: r.name)
@@ -44,6 +45,6 @@ def circuit_to_qiskit(c: Circuit) -> qiskit.circuit.QuantumCircuit:
         for control in gate.controls:
             if control[1]:
                 qc.x(qubits[control[0].index])
-    
+
     qc = qiskit.transpile(qc)
     return qc
