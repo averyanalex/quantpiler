@@ -3,7 +3,7 @@ from .quantpiler import *
 import qiskit
 
 
-def circuit_to_qiskit(c: Circuit) -> qiskit.circuit.QuantumCircuit:
+def circuit_to_qiskit(c: Circuit, rev=False) -> qiskit.circuit.QuantumCircuit:
     qubits = {}
     args = []
     ancs = []
@@ -32,7 +32,11 @@ def circuit_to_qiskit(c: Circuit) -> qiskit.circuit.QuantumCircuit:
 
     qc = qiskit.circuit.QuantumCircuit(*(args + ancs + rets))
 
-    for gate in c.gates:
+    gates = c.gates
+    if rev:
+        gates.reverse()
+
+    for gate in gates:
         controls = []
         for control in gate.controls:
             if control[1]:

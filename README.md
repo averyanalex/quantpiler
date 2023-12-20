@@ -45,8 +45,16 @@ qc = quantpiler.circuit_to_qiskit(circ)
 qc.draw("mpl")
 ```
 
-![Resulting
-circuit](https://raw.githubusercontent.com/averyanalex/quantpiler/main/example.png)
+![Resulting circuit](https://raw.githubusercontent.com/averyanalex/quantpiler/main/example.png)
+
+```python
+# returning ancillas and arguments to their original state
+rqc = quantpiler.circuit_to_qiskit(circ, rev=True)
+
+rqc.draw("mpl")
+```
+
+![Resulting reversed circuit](https://raw.githubusercontent.com/averyanalex/quantpiler/main/example-rev.png)
 
 ## User guide
 
