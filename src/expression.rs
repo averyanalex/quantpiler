@@ -37,13 +37,13 @@ impl Expression {
         let mut runner = Runner::default()
             .with_egraph(self.egraph.lock().unwrap().clone())
             .with_time_limit(std::time::Duration::from_secs(3600))
-            .with_node_limit(100_000)
-            .with_iter_limit(50);
+            .with_node_limit(50_000)
+            .with_iter_limit(100);
         runner.roots.push(self.id);
 
         runner = runner.run(&make_rules());
 
-        crate::extract::extract(&runner.egraph, runner.roots[0], Cost)
+        crate::extract::extract(&runner.egraph, runner.roots[0], &mut Cost)
     }
 
     #[must_use]

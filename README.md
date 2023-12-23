@@ -6,7 +6,7 @@
 
 ## Achievements:
 
-- CRC32 hash function (4 byte input) - 411 qubits.
+- CRC32 hash function (4 byte input) - 318 qubits.
 
 ## Architecture:
 

@@ -1,6 +1,6 @@
 [package]
 name = "quantpiler"
-version = "0.3.4"
+version = "0.3.5"
 authors = ["Alexander Averyanov <alex@averyan.ru>"]
 edition = "2021"
 description = "Сompiler of classical algorithms into oracles for quantum computing"
@@ -15,18 +15,14 @@ crate-type = ["cdylib"]
 [dependencies]
 egg = "0.9.5"
 
-egraph-serialize = { git = "https://github.com/egraphs-good/egraph-serialize" }
 itertools = "0.12.0"
 num = "0.4.1"
 rand = "0.8.5"
 rustc-hash = "1.1.0"
-indexmap = "2.1.0"
 petgraph = "0.6.4"
 log = "0.4.20"
-good_lp = { version = "1.7.0", default-features = false, features = ["highs"] }
 
 pyo3 = { version = "0.20.0", features = ["extension-module"], optional = true }
-ordered-float = "3.9.2"
 
 [features]
 python = ["pyo3"]

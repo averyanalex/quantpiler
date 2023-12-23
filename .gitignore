@@ -1,7 +1,7 @@
 .direnv
 target
 *.dot
-.env
+.venv
 .jupyter
 __pycache__
 *.so
