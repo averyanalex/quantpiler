@@ -24,20 +24,17 @@ define_language! {
 }
 
 impl Logic {
-    fn optimize(&self, egraph: &EGraph<Logic, LogicConstantFolding>) -> Self {
+    fn optimize(&self, egraph: &EGraph<Self, LogicConstantFolding>) -> Self {
         match self {
-            Logic::Xor(args) => {
-                assert!(!args.is_empty());
-
-                let mut powerful_xor_args = FxHashSet::default();
-                let mut parents = FxHashSet::default();
+            Self::Xor(args) => {
+                #[allow(clippy::unnecessary_wraps)]
                 fn collect_xor_args(
                     args: &[Id],
                     _egraph: &EGraph<Logic, LogicConstantFolding>,
                     powerful_xor_args: &mut FxHashSet<Id>,
                     parents: &mut FxHashSet<Id>,
                 ) -> Option<()> {
-                    for arg in args.iter() {
+                    for arg in args {
                         parents.insert(*arg);
                         // if let Logic::Xor(inner_args) = &egraph[*arg].data.optimized {
                         //     if inner_args.iter().any(|a| parents.contains(a)) {
@@ -54,33 +51,35 @@ impl Logic {
                     }
                     Some(())
                 }
+
+                assert!(!args.is_empty());
+
+                let mut powerful_xor_args = FxHashSet::default();
+                let mut parents = FxHashSet::default();
+
                 if collect_xor_args(args, egraph, &mut powerful_xor_args, &mut parents).is_some() {
                     if powerful_xor_args.is_empty() {
-                        Logic::Const(false)
+                        Self::Const(false)
                     } else if powerful_xor_args.len() == 1 {
                         egraph[powerful_xor_args.into_iter().next().unwrap()]
                             .data
                             .optimized
                             .clone()
                     } else {
-                        Logic::Xor(powerful_xor_args.into_iter().collect())
+                        Self::Xor(powerful_xor_args.into_iter().collect())
                     }
                 } else {
                     self.clone()
                 }
             }
-            Logic::And(args) => {
-                assert!(!args.is_empty());
-
-                let mut unique_and_args = FxHashSet::default();
-                let mut parents = FxHashSet::default();
+            Self::And(args) => {
                 fn collect_and_args(
                     args: &[Id],
                     egraph: &EGraph<Logic, LogicConstantFolding>,
                     unique_and_args: &mut FxHashSet<Id>,
                     parents: &mut FxHashSet<Id>,
                 ) -> Option<()> {
-                    for arg in args.iter() {
+                    for arg in args {
                         parents.insert(*arg);
                         match &egraph[*arg].data.optimized {
                             Logic::And(inner_args) => {
@@ -100,10 +99,15 @@ impl Logic {
                     Some(())
                 }
 
+                assert!(!args.is_empty());
+
+                let mut unique_and_args = FxHashSet::default();
+                let mut parents = FxHashSet::default();
+
                 if collect_and_args(args, egraph, &mut unique_and_args, &mut parents).is_some() {
                     if unique_and_args.is_empty() {
                         // the only arg was in and is true
-                        Logic::Const(true)
+                        Self::Const(true)
                     } else if unique_and_args.len() == 1 {
                         egraph[unique_and_args.into_iter().next().unwrap()]
                             .data
@@ -111,19 +115,19 @@ impl Logic {
                             .clone()
                     } else if unique_and_args
                         .iter()
-                        .any(|a| egraph[*a].data.optimized == Logic::Const(false))
+                        .any(|a| egraph[*a].data.optimized == Self::Const(false))
                     {
-                        Logic::Const(false)
+                        Self::Const(false)
                     } else {
-                        Logic::And(unique_and_args.into_iter().collect())
+                        Self::And(unique_and_args.into_iter().collect())
                     }
                 } else {
                     self.clone()
                 }
             }
-            Logic::Not(arg) => match egraph[*arg].data.optimized.clone() {
-                Logic::Not(arg_in_not) => egraph[arg_in_not].data.optimized.clone(),
-                Logic::Const(constant) => Logic::Const(!constant),
+            Self::Not(arg) => match egraph[*arg].data.optimized.clone() {
+                Self::Not(arg_in_not) => egraph[arg_in_not].data.optimized.clone(),
+                Self::Const(constant) => Self::Const(!constant),
                 _ => self.clone(),
             },
             _ => self.clone(),
@@ -206,12 +210,9 @@ impl Analysis<Logic> for LogicConstantFolding {
         let make_value = || match enode {
             Logic::Xor(args) => args
                 .iter()
-                .map(|arg| xc(arg))
+                .map(xc)
                 .fold_options(false, |acc, arg| acc ^ arg),
-            Logic::And(args) => args
-                .iter()
-                .map(|arg| xc(arg))
-                .fold_options(true, |acc, arg| acc & arg),
+            Logic::And(args) => args.iter().map(xc).fold_options(true, |acc, arg| acc & arg),
             Logic::Not(a) => Some(!xc(a)?),
             Logic::Const(a) => Some(*a),
             Logic::Register(_) | Logic::Arg(_) => None,
@@ -224,7 +225,7 @@ impl Analysis<Logic> for LogicConstantFolding {
             if let Some(v) = value {
                 assert_eq!(v, *c);
             } else {
-                value = Some(*c)
+                value = Some(*c);
             }
         }
 
@@ -250,6 +251,7 @@ impl LpCostFunction<Logic, LogicConstantFolding> for XorMinimizerCost {
         _eclass: Id,
         enode: &Logic,
     ) -> f64 {
+        #[allow(clippy::match_same_arms)]
         match enode {
             Logic::Xor(_srcs) => {
                 // let a = egraph.id_to_expr(*a);
@@ -292,26 +294,18 @@ fn build_add(egraph: &mut EGraph<Logic, LogicConstantFolding>, a: &[Id], b: &[Id
                     a_xor_b
                 }
             }
-            itertools::EitherOrBoth::Left(a) => {
-                if let Some(cin) = c {
-                    c = Some(egraph.add(Logic::And(Box::new([cin, *a]))));
-                    egraph.add(Logic::Xor(Box::new([cin, *a])))
-                } else {
-                    *a
-                }
-            }
-            itertools::EitherOrBoth::Right(b) => {
-                if let Some(cin) = c {
-                    c = Some(egraph.add(Logic::And(Box::new([cin, *b]))));
-                    egraph.add(Logic::Xor(Box::new([cin, *b])))
-                } else {
-                    *b
-                }
-            }
+            itertools::EitherOrBoth::Left(a) => c.map_or(*a, |cin| {
+                c = Some(egraph.add(Logic::And(Box::new([cin, *a]))));
+                egraph.add(Logic::Xor(Box::new([cin, *a])))
+            }),
+            itertools::EitherOrBoth::Right(b) => c.map_or(*b, |cin| {
+                c = Some(egraph.add(Logic::And(Box::new([cin, *b]))));
+                egraph.add(Logic::Xor(Box::new([cin, *b])))
+            }),
         })
         .collect_vec();
     if let Some(c) = c {
-        bits.push(c)
+        bits.push(c);
     }
     bits
 }
@@ -372,128 +366,127 @@ impl Logificator {
     }
 
     fn get_logificated(&mut self, id: Id) -> Vec<Id> {
-        match self.op_cache.get(&id) {
-            Some(bits) => bits.clone(),
-            None => {
-                let op = self.op_expr[id].clone();
-                let ids: Vec<_> = match op {
-                    Op::Argument(argument) => (0..(argument.size))
-                        .map(|index| {
-                            Logic::Arg(ArgInfo {
-                                name: argument.name.clone(),
-                                index,
-                            })
+        if let Some(bits) = self.op_cache.get(&id) {
+            bits.clone()
+        } else {
+            let op = self.op_expr[id].clone();
+            let ids: Vec<_> = match op {
+                Op::Argument(argument) => (0..(argument.size))
+                    .map(|index| {
+                        Logic::Arg(ArgInfo {
+                            name: argument.name.clone(),
+                            index,
                         })
-                        .map(|l| self.egraph.add(l))
-                        .collect(),
-                    Op::Ternary([cond, then, or]) => {
-                        let cond = self.get_logificated(cond)[0];
-                        let inv_cond = self.egraph.add(Logic::Not(cond));
+                    })
+                    .map(|l| self.egraph.add(l))
+                    .collect(),
+                Op::Ternary([cond, then, or]) => {
+                    let cond = self.get_logificated(cond)[0];
+                    let inv_cond = self.egraph.add(Logic::Not(cond));
 
-                        self.get_logificated(then)
-                            .into_iter()
-                            .zip_longest(self.get_logificated(or).into_iter())
-                            .map(|thenor| match thenor {
-                                itertools::EitherOrBoth::Both(then, or) => {
-                                    let then_cond =
-                                        self.egraph.add(Logic::And(Box::new([then, cond])));
-                                    let or_inv_cond =
-                                        self.egraph.add(Logic::And(Box::new([or, inv_cond])));
-                                    self.egraph
-                                        .add(Logic::Xor(Box::new([then_cond, or_inv_cond])))
-                                }
-                                itertools::EitherOrBoth::Left(then) => {
-                                    self.egraph.add(Logic::And(Box::new([then, cond])))
-                                }
-                                itertools::EitherOrBoth::Right(or) => {
-                                    self.egraph.add(Logic::And(Box::new([or, inv_cond])))
-                                }
-                            })
-                            .collect()
-                    }
-                    Op::Constant(value) => (0..64)
-                        .map(|i| ((u64::try_from(value.clone()).unwrap() >> i) & 1) == 1)
-                        .rev()
-                        .collect_vec()
+                    self.get_logificated(then)
                         .into_iter()
-                        .skip_while(|x| !x)
-                        .map(Logic::Const)
-                        .map(|l| self.egraph.add(l))
-                        .collect_vec()
-                        .into_iter()
-                        .rev()
-                        .collect_vec(),
-                    Op::Not(a) => self
-                        .get_logificated(a)
-                        .into_iter()
-                        .map(Logic::Not)
-                        .map(|l| self.egraph.add(l))
-                        .collect(),
-                    Op::Xor([a, b]) => self
-                        .get_logificated(a)
-                        .into_iter()
-                        .zip_longest(self.get_logificated(b).into_iter())
-                        .map(|ab| match ab {
-                            itertools::EitherOrBoth::Both(a, b) => {
-                                self.egraph.add(Logic::Xor(Box::new([a, b])))
+                        .zip_longest(self.get_logificated(or))
+                        .map(|thenor| match thenor {
+                            itertools::EitherOrBoth::Both(then, or) => {
+                                let then_cond = self.egraph.add(Logic::And(Box::new([then, cond])));
+                                let or_inv_cond =
+                                    self.egraph.add(Logic::And(Box::new([or, inv_cond])));
+                                self.egraph
+                                    .add(Logic::Xor(Box::new([then_cond, or_inv_cond])))
                             }
-                            itertools::EitherOrBoth::Left(a)
-                            | itertools::EitherOrBoth::Right(a) => a,
-                        })
-                        .collect(),
-                    Op::Or([a, b]) => self
-                        .get_logificated(a)
-                        .into_iter()
-                        .zip_longest(self.get_logificated(b).into_iter())
-                        .map(|ab| match ab {
-                            itertools::EitherOrBoth::Both(a, b) => {
-                                let not_a = self.egraph.add(Logic::Not(a));
-                                let not_b = self.egraph.add(Logic::Not(b));
-                                let not_a_not_b =
-                                    self.egraph.add(Logic::And(Box::new([not_a, not_b])));
-                                self.egraph.add(Logic::Not(not_a_not_b))
+                            itertools::EitherOrBoth::Left(then) => {
+                                self.egraph.add(Logic::And(Box::new([then, cond])))
                             }
-                            itertools::EitherOrBoth::Left(a)
-                            | itertools::EitherOrBoth::Right(a) => a,
+                            itertools::EitherOrBoth::Right(or) => {
+                                self.egraph.add(Logic::And(Box::new([or, inv_cond])))
+                            }
                         })
-                        .collect(),
-                    Op::And([a, b]) => self
-                        .get_logificated(a)
+                        .collect()
+                }
+                Op::Constant(value) => (0..64)
+                    .map(|i| ((u64::try_from(value.clone()).unwrap() >> i) & 1) == 1)
+                    .rev()
+                    .collect_vec()
+                    .into_iter()
+                    .skip_while(|x| !x)
+                    .map(Logic::Const)
+                    .map(|l| self.egraph.add(l))
+                    .collect_vec()
+                    .into_iter()
+                    .rev()
+                    .collect_vec(),
+                Op::Not(a) => self
+                    .get_logificated(a)
+                    .into_iter()
+                    .map(Logic::Not)
+                    .map(|l| self.egraph.add(l))
+                    .collect(),
+                Op::Xor([a, b]) => self
+                    .get_logificated(a)
+                    .into_iter()
+                    .zip_longest(self.get_logificated(b))
+                    .map(|ab| match ab {
+                        itertools::EitherOrBoth::Both(a, b) => {
+                            self.egraph.add(Logic::Xor(Box::new([a, b])))
+                        }
+                        itertools::EitherOrBoth::Left(a) | itertools::EitherOrBoth::Right(a) => a,
+                    })
+                    .collect(),
+                Op::Or([a, b]) => self
+                    .get_logificated(a)
+                    .into_iter()
+                    .zip_longest(self.get_logificated(b))
+                    .map(|ab| match ab {
+                        itertools::EitherOrBoth::Both(a, b) => {
+                            let not_a = self.egraph.add(Logic::Not(a));
+                            let not_b = self.egraph.add(Logic::Not(b));
+                            let not_a_not_b = self.egraph.add(Logic::And(Box::new([not_a, not_b])));
+                            self.egraph.add(Logic::Not(not_a_not_b))
+                        }
+                        itertools::EitherOrBoth::Left(a) | itertools::EitherOrBoth::Right(a) => a,
+                    })
+                    .collect(),
+                Op::And([a, b]) => self
+                    .get_logificated(a)
+                    .into_iter()
+                    .zip(self.get_logificated(b))
+                    .map(|(a, b)| Logic::And(Box::new([a, b])))
+                    .map(|l| self.egraph.add(l))
+                    .collect(),
+                Op::Shr([target, distance]) => {
+                    let Op::Constant(distance) = self.op_expr[distance].clone() else {
+                        todo!()
+                    };
+                    self.get_logificated(target)
                         .into_iter()
-                        .zip(self.get_logificated(b))
-                        .map(|(a, b)| Logic::And(Box::new([a, b])))
-                        .map(|l| self.egraph.add(l))
-                        .collect(),
-                    Op::Shr([target, distance]) => {
-                        let Op::Constant(distance) = self.op_expr[distance].clone() else {todo!()};
-                        self.get_logificated(target)
-                            .into_iter()
-                            .skip(distance.try_into().unwrap())
-                            .collect()
-                    }
-                    Op::Shl([target, distance]) => {
-                        let Op::Constant(distance) = self.op_expr[distance].clone() else {todo!()};
-                        iter::repeat(self.egraph.add(Logic::Const(false)))
-                            .take(distance.try_into().unwrap())
-                            .chain(self.get_logificated(target).into_iter())
-                            .collect()
-                    }
-                    Op::Add([a, b]) => {
-                        let a = self.get_logificated(a);
-                        let b = self.get_logificated(b);
-                        build_add(&mut self.egraph, &a, &b)
-                    }
-                    Op::Mul([a, b]) => {
-                        let a = self.get_logificated(a);
-                        let b = self.get_logificated(b);
-                        build_mul(&mut self.egraph, &a, &b)
-                    }
-                    _ => todo!("{op}"),
-                };
+                        .skip(distance.try_into().unwrap())
+                        .collect()
+                }
+                Op::Shl([target, distance]) => {
+                    let Op::Constant(distance) = self.op_expr[distance].clone() else {
+                        todo!()
+                    };
+                    iter::repeat(self.egraph.add(Logic::Const(false)))
+                        .take(distance.try_into().unwrap())
+                        .chain(self.get_logificated(target))
+                        .collect()
+                }
+                Op::Add([a, b]) => {
+                    let a = self.get_logificated(a);
+                    let b = self.get_logificated(b);
+                    build_add(&mut self.egraph, &a, &b)
+                }
+                Op::Mul([a, b]) => {
+                    let a = self.get_logificated(a);
+                    let b = self.get_logificated(b);
+                    build_mul(&mut self.egraph, &a, &b)
+                }
+                _ => todo!("{op}"),
+            };
 
-                self.op_cache.insert(id, ids.clone());
-                ids
-            }
+            self.op_cache.insert(id, ids.clone());
+            ids
         }
     }
 }

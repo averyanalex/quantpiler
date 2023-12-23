@@ -1,5 +1,20 @@
 #![feature(let_chains)]
 #![feature(lazy_cell)]
+#![warn(clippy::pedantic, clippy::nursery)]
+#![allow(
+    clippy::wildcard_imports,
+    clippy::enum_glob_use,
+    clippy::too_many_lines,
+    clippy::must_use_candidate,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::trivially_copy_pass_by_ref,
+    clippy::redundant_closure_for_method_calls,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::implicit_hasher,
+    clippy::tuple_array_conversions
+)]
 
 pub mod circuit;
 pub mod compiler;

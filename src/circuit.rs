@@ -21,7 +21,7 @@ pub struct Qubit {
 }
 
 impl Qubit {
-    pub fn new(index: u32) -> Self {
+    pub const fn new(index: u32) -> Self {
         Self { index }
     }
 }
@@ -146,7 +146,7 @@ impl Circuit {
 
     pub fn cx(&mut self, source: Qubit, inversed: bool, target: Qubit) {
         self.gates.push(GateX {
-            controls: [(source, inversed)].into_iter().collect(),
+            controls: std::iter::once((source, inversed)).collect(),
             target,
         });
     }
@@ -198,7 +198,7 @@ impl Circuit {
 
         for (qubit, values) in &self.qubits_map {
             for value in values {
-                if let QubitRegisterEnum::Result = value.reg.0 {
+                if value.reg.0 == QubitRegisterEnum::Result {
                     result[value.index as usize] = *qubits.get(qubit).unwrap_or(&false);
                 }
             }

@@ -55,7 +55,7 @@ impl ExtractionResult {
         let mut cycles = vec![];
         for root in roots {
             // let root_index = egraph.classes().get_index_of(root).unwrap();
-            self.cycle_dfs(egraph, root, &mut status, &mut cycles)
+            self.cycle_dfs(egraph, root, &mut status, &mut cycles);
         }
         cycles
     }
@@ -67,7 +67,7 @@ impl ExtractionResult {
         status: &mut IndexMap<ClassId, Status>,
         cycles: &mut Vec<ClassId>,
     ) {
-        match status.get(class_id).cloned() {
+        match status.get(class_id).copied() {
             Some(Status::Done) => (),
             Some(Status::Doing) => cycles.push(class_id.clone()),
             None => {
@@ -76,7 +76,7 @@ impl ExtractionResult {
                 let node = &egraph[node_id];
                 for child in &node.children {
                     let child_cid = egraph.nid_to_cid(child);
-                    self.cycle_dfs(egraph, child_cid, status, cycles)
+                    self.cycle_dfs(egraph, child_cid, status, cycles);
                 }
                 status.insert(class_id.clone(), Status::Done);
             }
@@ -146,7 +146,7 @@ impl Extractor for CbcExtractor {
             for node in &egraph[class_id].nodes[1..] {
                 intersection = intersection
                     .intersection(&childrens_classes_var(node.clone()))
-                    .cloned()
+                    .copied()
                     .collect();
             }
 
@@ -179,7 +179,7 @@ impl Extractor for CbcExtractor {
                 .iter()
                 .map(|n_id| egraph[n_id].cost)
                 .min()
-                .unwrap_or(Cost::default())
+                .unwrap_or_else(Cost::default)
                 .into_inner();
 
             // Most helpful when the members of the class all have the same cost.
@@ -202,7 +202,7 @@ impl Extractor for CbcExtractor {
             }
         }
 
-        let mut banned_cycles: IndexSet<(ClassId, usize)> = Default::default();
+        let mut banned_cycles: IndexSet<(ClassId, usize)> = IndexSet::default();
         find_cycles(egraph, |id, i| {
             banned_cycles.insert((id, i));
         });
@@ -332,7 +332,7 @@ fn find_cycles(egraph: &egraph_serialize::EGraph, mut f: impl FnMut(ClassId, usi
     for class in egraph.classes().values() {
         let id = &class.id;
         for (i, node) in class.nodes.iter().enumerate() {
-            if let Some(true) = memo.get(&(id.clone(), i)) {
+            if memo.get(&(id.clone(), i)) == Some(&true) {
                 continue;
             }
             assert!(!egraph[node].is_leaf());
@@ -349,7 +349,7 @@ where
     C: LpCostFunction<L, A>,
 {
     let root = egraph.find(root);
-    let serialized_root = ClassId::from(format!("{}", root));
+    let serialized_root = ClassId::from(format!("{root}"));
     let serialized_egraph = egg_to_serialized_egraph(egraph, &[serialized_root.clone()], cost);
 
     let extractor = CbcExtractor {};
@@ -357,7 +357,7 @@ where
     let result = extractor.extract(&serialized_egraph, &[serialized_root]);
 
     let get_by_id = |id: Id| {
-        let class_id = ClassId::from(format!("{}", id));
+        let class_id = ClassId::from(format!("{id}"));
         let node_id = result.choices.get(&class_id).unwrap();
         let node_id_str = node_id.to_string();
         let index_str = node_id_str.split('.').nth(1).unwrap();
@@ -393,12 +393,12 @@ where
                     children: node
                         .children()
                         .iter()
-                        .map(|id| NodeId::from(format!("{}.0", id)))
+                        .map(|id| NodeId::from(format!("{id}.0")))
                         .collect(),
                     eclass: ClassId::from(format!("{}", class.id)),
                     cost: Cost::new(cost.node_cost(egraph, class.id, node)).unwrap(),
                 },
-            )
+            );
         }
     }
     out.root_eclasses.extend(roots.iter().cloned());

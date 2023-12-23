@@ -14,11 +14,11 @@ fn vec_bool_to_biguint(input: &[bool]) -> num::BigUint {
     res
 }
 
-pub(crate) fn verify(expr: &RecExpr<Op>, logic: &RecExpr<Logic>, circuit: &Circuit) {
+pub fn verify(expr: &RecExpr<Op>, logic: &RecExpr<Logic>, circuit: &Circuit) {
     let mut arguments = FxHashMap::default();
     for op in expr.as_ref() {
         if let Op::Argument(a) = op {
-            assert!(arguments.insert(a.name.clone(), a.size).is_none())
+            assert!(arguments.insert(a.name.clone(), a.size).is_none());
         }
     }
 

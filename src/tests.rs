@@ -2,26 +2,25 @@ use crate::{compile, expression::Expression};
 
 #[test]
 fn crc32() {
+    fn table(ch: &Expression) -> Expression {
+        let poly = 0xEDB8_8320_u32;
+
+        (0..8u32)
+            .map(|i| ch.clone() >> i)
+            .fold(ch.constant(0u32), |table, ch| {
+                ((ch ^ table.clone()) & 1u32)
+                    .ternary(&((table.clone() >> 1u32) ^ poly), &(table >> 1u32))
+            })
+    }
+
     let size = 32;
 
     let input = Expression::new_argument("input", size);
-    let mut value = input.constant(0xFFFFFFFFu32);
-
-    fn table(mut ch: Expression) -> Expression {
-        let poly = 0xEDB88320u32;
-
-        let mut table = ch.constant(0u32);
-        for _ in 0..8u32 {
-            table = ((ch.clone() ^ table.clone()) & 1u32)
-                .ternary((table.clone() >> 1u32) ^ poly, table >> 1u32);
-            ch = ch >> 1u32;
-        }
-        table
-    }
+    let mut value = input.constant(0xFFFF_FFFF_u32);
 
     for byte in (0..(size / 8)).map(|i| (input.clone() >> (i * 8)) & 0xFFu32) {
         let ch = (byte ^ value.clone()) & 0xFFu32;
-        value = table(ch) ^ (value >> 8u32);
+        value = table(&ch) ^ (value >> 8u32);
     }
 
     compile(&value);
@@ -46,7 +45,7 @@ fn apowxmodn() {
     let a = 5u32;
 
     let prod = (0..x_len).fold(x.constant(1u32), |acc, i| {
-        ((x.clone() >> i) & 1u32).ternary(acc.clone() * a.pow(2u32.pow(i)), acc) & 0b1111u32
+        ((x.clone() >> i) & 1u32).ternary(&(acc.clone() * a.pow(2u32.pow(i))), &acc) & 0b1111u32
     });
 
     compile(&prod);

@@ -9,17 +9,17 @@ use pyo3::prelude::*;
 
 #[cfg(feature = "python")]
 use crate::circuit::Circuit;
-use crate::op::{make_rules, ArgumentInfo, Op, OpAnalyzer, OpCost};
+use crate::op::{make_rules, ArgumentInfo, Op, Analyzer, Cost};
 
 #[derive(Clone)]
 pub struct Expression {
     id: Id,
-    egraph: Arc<Mutex<EGraph<Op, OpAnalyzer>>>,
+    egraph: Arc<Mutex<EGraph<Op, Analyzer>>>,
 }
 
 impl Expression {
     pub fn new_argument<N: Into<String>>(name: N, size: u32) -> Self {
-        let egraph = Arc::new(Mutex::new(EGraph::new(OpAnalyzer)));
+        let egraph = Arc::new(Mutex::new(EGraph::new(Analyzer)));
         let id = egraph.lock().unwrap().add(Op::Argument(ArgumentInfo {
             size,
             name: name.into(),
@@ -28,7 +28,7 @@ impl Expression {
     }
 
     pub fn new_constant<T: Into<BigUint>>(value: T) -> Self {
-        let egraph = Arc::new(Mutex::new(EGraph::new(OpAnalyzer)));
+        let egraph = Arc::new(Mutex::new(EGraph::new(Analyzer)));
         let id = egraph.lock().unwrap().add(Op::Constant(value.into()));
         Self { id, egraph }
     }
@@ -43,9 +43,10 @@ impl Expression {
 
         runner = runner.run(&make_rules());
 
-        crate::extract::extract(&runner.egraph, runner.roots[0], OpCost)
+        crate::extract::extract(&runner.egraph, runner.roots[0], Cost)
     }
 
+    #[must_use]
     pub fn argument<N: Into<String>>(&self, name: N, size: u32) -> Self {
         let id = self.egraph.lock().unwrap().add(Op::Argument(ArgumentInfo {
             size,
@@ -57,15 +58,17 @@ impl Expression {
         }
     }
 
+    #[must_use]
     pub fn constant<T: Into<BigUint>>(&self, value: T) -> Self {
         let id = self.egraph.lock().unwrap().add(Op::Constant(value.into()));
-        Expression {
+        Self {
             id,
             egraph: self.egraph.clone(),
         }
     }
 
-    pub fn ternary<T1: IntoId, T2: IntoId>(&self, then: T1, or: T2) -> Expression {
+    #[must_use]
+    pub fn ternary<T1: IntoId, T2: IntoId>(&self, then: &T1, or: &T2) -> Self {
         let then_id = then.id(&self.egraph);
         let or_id = or.id(&self.egraph);
 
@@ -74,7 +77,7 @@ impl Expression {
             .lock()
             .unwrap()
             .add(Op::Ternary([self.id, then_id, or_id]));
-        Expression {
+        Self {
             id,
             egraph: self.egraph.clone(),
         }
@@ -82,18 +85,18 @@ impl Expression {
 }
 
 pub trait IntoId {
-    fn id(&self, egraph: &Arc<Mutex<EGraph<Op, OpAnalyzer>>>) -> Id;
+    fn id(&self, egraph: &Arc<Mutex<EGraph<Op, Analyzer>>>) -> Id;
 }
 
 impl IntoId for Expression {
-    fn id(&self, egraph: &Arc<Mutex<EGraph<Op, OpAnalyzer>>>) -> Id {
+    fn id(&self, egraph: &Arc<Mutex<EGraph<Op, Analyzer>>>) -> Id {
         assert!(Arc::ptr_eq(&self.egraph, egraph));
         self.id
     }
 }
 
 impl<T: Into<BigUint> + Clone> IntoId for T {
-    fn id(&self, egraph: &Arc<Mutex<EGraph<Op, OpAnalyzer>>>) -> Id {
+    fn id(&self, egraph: &Arc<Mutex<EGraph<Op, Analyzer>>>) -> Id {
         egraph
             .lock()
             .unwrap()
@@ -106,7 +109,7 @@ impl std::ops::Not for Expression {
 
     fn not(self) -> Self::Output {
         let id = self.egraph.lock().unwrap().add(Op::Not(self.id));
-        Expression {
+        Self {
             id,
             egraph: self.egraph,
         }
@@ -179,8 +182,8 @@ enum RhsTypes {
 impl RhsTypes {
     fn expr(self) -> Expression {
         match self {
-            RhsTypes::Const(c) => ZERO_EXPR.constant(c),
-            RhsTypes::Expr(e) => e.0,
+            Self::Const(c) => ZERO_EXPR.constant(c),
+            Self::Expr(e) => e.0,
         }
     }
 }
@@ -189,7 +192,7 @@ impl RhsTypes {
 #[pymethods]
 impl Expr {
     fn ternary(&self, then: RhsTypes, or: RhsTypes) -> Self {
-        Self(self.0.ternary(then.expr(), or.expr()))
+        Self(self.0.ternary(&then.expr(), &or.expr()))
     }
 
     fn compile(&self) -> Circuit {

@@ -52,8 +52,8 @@ pub struct AnalyzerData {
 }
 
 #[derive(Default, Clone)]
-pub struct OpAnalyzer;
-impl Analysis<Op> for OpAnalyzer {
+pub struct Analyzer;
+impl Analysis<Op> for Analyzer {
     type Data = AnalyzerData;
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
@@ -117,7 +117,7 @@ impl Analysis<Op> for OpAnalyzer {
     }
 }
 
-pub fn make_rules() -> Vec<Rewrite<Op, OpAnalyzer>> {
+pub fn make_rules() -> Vec<Rewrite<Op, Analyzer>> {
     use egg::rewrite as rw;
     let mut rules = vec![
         // Commutable
@@ -159,18 +159,17 @@ pub fn make_rules() -> Vec<Rewrite<Op, OpAnalyzer>> {
         rw!("merge-add-muls"; "(+ ?a (* ?a ?b))" => "(* ?a (+ 1 ?b))")
     ];
 
-    rules.append(&mut vec![
-        // Distributivity
-        rw!("distr-mul-add"; "(* (+ ?a ?b) ?c)" <=> "(+ (* ?a ?c) (* ?b ?c))"),
-    ].concat());
+    // Distributivity
+    rules.append(&mut [rw!("distr-mul-add"; "(* (+ ?a ?b) ?c)" <=> "(+ (* ?a ?c) (* ?b ?c))")].concat());
 
     rules
 }
 
-pub struct OpCost;
+pub struct Cost;
 
-impl LpCostFunction<Op, OpAnalyzer> for OpCost {
-    fn node_cost(&mut self, _egraph: &EGraph<Op, OpAnalyzer>, _eclass: Id, enode: &Op) -> f64 {
+impl LpCostFunction<Op, Analyzer> for Cost {
+    fn node_cost(&mut self, _egraph: &EGraph<Op, Analyzer>, _eclass: Id, enode: &Op) -> f64 {
+        #[allow(clippy::match_same_arms)]
         match enode {
             Op::Not(_) => 1.0,
             Op::Xor(_) => 4.0,

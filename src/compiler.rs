@@ -107,6 +107,7 @@ impl Compiler {
                 .all(|e| e.weight().done))
             || match node.kind {
                 LogicNodeKind::Xor | LogicNodeKind::Arg => false, // only can use XOR/Arg if qubit.is_some()
+                #[allow(clippy::match_same_arms)]
                 LogicNodeKind::Constant(_) => false, // there should be no gates dependent on constants
                 LogicNodeKind::Register | LogicNodeKind::And | LogicNodeKind::Not => self
                     .graph
@@ -150,8 +151,6 @@ impl Compiler {
     }
 
     fn construct_mcx(&mut self, and: NodeIndex, target: Qubit) {
-        let mut mcx_sources = FxHashSet::default();
-
         fn collect_sources_of_and(
             and: NodeIndex,
             graph: &DiGraph<LogicNode, LogicEdge>,
@@ -181,6 +180,8 @@ impl Compiler {
                 }
             }
         }
+
+        let mut mcx_sources = FxHashSet::default();
 
         collect_sources_of_and(and, &self.graph, &mut mcx_sources);
 
@@ -333,7 +334,8 @@ impl Compiler {
                     did_something_optimal = true;
                     // optimal += 1;
                 } else if self.count_undone_dependents(source) == 1
-                && self.graph[target].kind == LogicNodeKind::Xor && let Some(source_qubit) = self.graph[source].qubit
+                    && self.graph[target].kind == LogicNodeKind::Xor
+                    && let Some(source_qubit) = self.graph[source].qubit
                 {
                     assert!(self.graph[target].qubit.is_none());
 
@@ -345,7 +347,8 @@ impl Compiler {
                     did_something_optimal = true;
                     // optimal += 1;
                 } else if self.count_undone_dependents(source) == 1
-                && self.graph[target].kind == LogicNodeKind::Not && let Some(source_qubit) = self.graph[source].qubit
+                    && self.graph[target].kind == LogicNodeKind::Not
+                    && let Some(source_qubit) = self.graph[source].qubit
                 {
                     assert!(self.graph[target].qubit.is_none());
 
@@ -362,7 +365,9 @@ impl Compiler {
             }
 
             if !did_something_optimal {
-                let Some(edge) = available_edges.first() else {panic!("can't compile")};
+                let Some(edge) = available_edges.first() else {
+                    panic!("can't compile")
+                };
                 let (_, target) = self.graph.edge_endpoints(*edge).unwrap();
 
                 assert!(self.graph[target].qubit.is_none()); // unoptimal => allocation
@@ -391,7 +396,7 @@ impl Compiler {
                     reg: QubitRegister(QubitRegisterEnum::Result),
                     index: idx as u32,
                 },
-            )
+            );
         }
 
         // println!("Allocs: {allocs}, optimal: {optimal}");
