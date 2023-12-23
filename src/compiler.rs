@@ -248,7 +248,7 @@ impl Compiler {
                         self.construct_mcx(target, target_qubit);
                         self.circuit.x(target_qubit);
                     } else {
-                        todo!();
+                        todo!("{:?}", self.graph[source].kind);
                     }
                 }
             },

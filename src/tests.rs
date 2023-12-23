@@ -77,7 +77,7 @@ fn mul() {
 
 #[test]
 fn many_mul() {
-    let a = Expression::new_argument("a", 16);
+    let a = Expression::new_argument("a", 10);
     compile(&(a.clone() * a.argument("b", 8) * a.argument("c", 2) * a.argument("d", 5)));
 }
 

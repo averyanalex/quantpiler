@@ -30,6 +30,8 @@ pub fn compile(expr: &expression::Expression) -> circuit::Circuit {
     let logic = logic::Logificator::new(op.clone()).build_logic();
     let circuit = compiler::Compiler::new(&logic).compile();
 
+    // println!("Qubits: {}", circuit.qubits_count);
+
     verify::verify(&op, &logic, &circuit);
 
     circuit

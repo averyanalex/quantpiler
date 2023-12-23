@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 
 #[cfg(feature = "python")]
 use crate::circuit::Circuit;
-use crate::op::{make_rules, ArgumentInfo, Op, Analyzer, Cost};
+use crate::op::{make_rules, Analyzer, ArgumentInfo, Cost, Op};
 
 #[derive(Clone)]
 pub struct Expression {

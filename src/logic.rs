@@ -24,29 +24,38 @@ define_language! {
 }
 
 impl Logic {
-    fn optimize(&self, egraph: &EGraph<Self, LogicConstantFolding>) -> Self {
-        match self {
+    fn optimize(mut self, egraph: &EGraph<Self, LogicConstantFolding>) -> Self {
+        if !matches!(self, Self::Register(..)) {
+            for child in self.children_mut() {
+                *child = egraph.find(*child);
+            }
+            self.children_mut().sort_unstable();
+        }
+
+        match &self {
             Self::Xor(args) => {
                 #[allow(clippy::unnecessary_wraps)]
                 fn collect_xor_args(
                     args: &[Id],
-                    _egraph: &EGraph<Logic, LogicConstantFolding>,
+                    egraph: &EGraph<Logic, LogicConstantFolding>,
                     powerful_xor_args: &mut FxHashSet<Id>,
-                    parents: &mut FxHashSet<Id>,
+                    my_id: Option<Id>,
                 ) -> Option<()> {
-                    for arg in args {
-                        parents.insert(*arg);
-                        // if let Logic::Xor(inner_args) = &egraph[*arg].data.optimized {
-                        //     if inner_args.iter().any(|a| parents.contains(a)) {
-                        //         // panic!("infinite recursion detected");
-                        //         return None;
-                        //     }
-                        //     collect_xor_args(inner_args, egraph, powerful_xor_args, parents);
-                        // } else if powerful_xor_args.contains(arg) {
-                        if powerful_xor_args.contains(arg) {
-                            powerful_xor_args.remove(arg);
+                    for arg in args.iter().map(|a| egraph.find(*a)) {
+                        if let Logic::Xor(inner_args) = &egraph[arg].data.optimized {
+                            if inner_args
+                                .iter()
+                                .map(|a| egraph.find(*a))
+                                .any(|a| my_id == Some(a))
+                            {
+                                return None;
+                            }
+
+                            collect_xor_args(inner_args, egraph, powerful_xor_args, Some(arg));
+                        } else if powerful_xor_args.contains(&arg) {
+                            powerful_xor_args.remove(&arg);
                         } else {
-                            powerful_xor_args.insert(*arg);
+                            powerful_xor_args.insert(arg);
                         }
                     }
                     Some(())
@@ -55,9 +64,8 @@ impl Logic {
                 assert!(!args.is_empty());
 
                 let mut powerful_xor_args = FxHashSet::default();
-                let mut parents = FxHashSet::default();
 
-                if collect_xor_args(args, egraph, &mut powerful_xor_args, &mut parents).is_some() {
+                if collect_xor_args(args, egraph, &mut powerful_xor_args, None).is_some() {
                     if powerful_xor_args.is_empty() {
                         Self::Const(false)
                     } else if powerful_xor_args.len() == 1 {
@@ -66,7 +74,7 @@ impl Logic {
                             .optimized
                             .clone()
                     } else {
-                        Self::Xor(powerful_xor_args.into_iter().collect())
+                        Self::Xor(powerful_xor_args.into_iter().sorted_unstable().collect())
                     }
                 } else {
                     self.clone()
@@ -77,22 +85,24 @@ impl Logic {
                     args: &[Id],
                     egraph: &EGraph<Logic, LogicConstantFolding>,
                     unique_and_args: &mut FxHashSet<Id>,
-                    parents: &mut FxHashSet<Id>,
+                    my_id: Option<Id>,
                 ) -> Option<()> {
-                    for arg in args {
-                        parents.insert(*arg);
-                        match &egraph[*arg].data.optimized {
+                    for arg in args.iter().map(|a| egraph.find(*a)) {
+                        match &egraph[arg].data.optimized {
                             Logic::And(inner_args) => {
-                                if inner_args.iter().any(|a| parents.contains(a)) {
-                                    // panic!("infinite recursion detected");
+                                if inner_args
+                                    .iter()
+                                    .map(|a| egraph.find(*a))
+                                    .any(|a| my_id == Some(a))
+                                {
                                     return None;
                                 }
 
-                                collect_and_args(inner_args, egraph, unique_and_args, parents)?;
+                                collect_and_args(inner_args, egraph, unique_and_args, Some(arg))?;
                             }
                             Logic::Const(true) => {}
                             _ => {
-                                unique_and_args.insert(*arg);
+                                unique_and_args.insert(arg);
                             }
                         }
                     }
@@ -102,9 +112,8 @@ impl Logic {
                 assert!(!args.is_empty());
 
                 let mut unique_and_args = FxHashSet::default();
-                let mut parents = FxHashSet::default();
 
-                if collect_and_args(args, egraph, &mut unique_and_args, &mut parents).is_some() {
+                if collect_and_args(args, egraph, &mut unique_and_args, None).is_some() {
                     if unique_and_args.is_empty() {
                         // the only arg was in and is true
                         Self::Const(true)
@@ -116,10 +125,19 @@ impl Logic {
                     } else if unique_and_args
                         .iter()
                         .any(|a| egraph[*a].data.optimized == Self::Const(false))
+                        || unique_and_args.iter().any(|and_arg| {
+                            if let Self::Not(not_arg) = egraph[*and_arg].data.optimized
+                                && unique_and_args.contains(&egraph.find(not_arg))
+                            {
+                                true
+                            } else {
+                                false
+                            }
+                        })
                     {
                         Self::Const(false)
                     } else {
-                        Self::And(unique_and_args.into_iter().collect())
+                        Self::And(unique_and_args.into_iter().sorted_unstable().collect())
                     }
                 } else {
                     self.clone()
@@ -131,6 +149,24 @@ impl Logic {
                 _ => self.clone(),
             },
             _ => self.clone(),
+        }
+    }
+
+    fn _unmerge(&self, egraph: &mut EGraph<Self, LogicConstantFolding>) -> Option<Id> {
+        match self {
+            Self::Xor(args) => {
+                fn split(egraph: &mut EGraph<Logic, LogicConstantFolding>, ids: &[Id]) -> Id {
+                    if ids.len() == 2 {
+                        egraph.add(Logic::Xor(ids.to_vec().into_boxed_slice()))
+                    } else {
+                        let l = Logic::Xor(Box::new([ids[0], split(egraph, &ids[1..])]));
+                        egraph.add(l)
+                    }
+                }
+                Some(split(egraph, args))
+            }
+            Self::And(_) => todo!(),
+            Self::Not(_) | Self::Register(_) | Self::Const(_) | Self::Arg(_) => None,
         }
     }
 }
@@ -219,7 +255,7 @@ impl Analysis<Logic> for LogicConstantFolding {
         };
 
         let mut value = make_value();
-        let optimized = enode.optimize(egraph);
+        let optimized = enode.clone().optimize(egraph);
 
         if let Logic::Const(c) = &optimized {
             if let Some(v) = value {
@@ -237,8 +273,13 @@ impl Analysis<Logic> for LogicConstantFolding {
             let added = egraph.add(Logic::Const(i));
             egraph.union(id, added);
         }
+
         let added = egraph.add(egraph[id].data.optimized.clone());
         egraph.union(id, added);
+
+        // if let Some(umerged_id) = egraph[id].data.optimized.clone().unmerge(egraph) {
+        //     egraph.union(id, umerged_id);
+        // }
     }
 }
 
