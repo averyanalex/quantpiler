@@ -23,8 +23,29 @@ define_language! {
     }
 }
 
+enum EGraphRef<'a> {
+    Immutable(&'a EGraph<Logic, Analyzer>),
+    Mutable(&'a mut EGraph<Logic, Analyzer>),
+}
+
+impl<'a> EGraphRef<'a> {
+    fn get_optimized_logic(&self, id: Id) -> Logic {
+        match self {
+            EGraphRef::Immutable(e) => e[id].data.optimized.clone(),
+            EGraphRef::Mutable(e) => e[id].data.optimized.clone(),
+        }
+    }
+
+    fn find(&self, id: Id) -> Id {
+        match self {
+            EGraphRef::Immutable(e) => e.find(id),
+            EGraphRef::Mutable(e) => e.find(id),
+        }
+    }
+}
+
 impl Logic {
-    fn optimize(mut self, egraph: &EGraph<Self, LogicConstantFolding>) -> Self {
+    fn optimize(mut self, egraph: &EGraphRef) -> Self {
         if !matches!(self, Self::Register(..)) {
             for child in self.children_mut() {
                 *child = egraph.find(*child);
@@ -37,12 +58,14 @@ impl Logic {
                 #[allow(clippy::unnecessary_wraps)]
                 fn collect_xor_args(
                     args: &[Id],
-                    egraph: &EGraph<Logic, LogicConstantFolding>,
+                    egraph: &EGraphRef,
                     powerful_xor_args: &mut FxHashSet<Id>,
+                    // wrap_in_not: &mut bool,
                     my_id: Option<Id>,
                 ) -> Option<()> {
+
                     for arg in args.iter().map(|a| egraph.find(*a)) {
-                        if let Logic::Xor(inner_args) = &egraph[arg].data.optimized {
+                        if let Logic::Xor(inner_args) = egraph.get_optimized_logic(arg) {
                             if inner_args
                                 .iter()
                                 .map(|a| egraph.find(*a))
@@ -51,7 +74,16 @@ impl Logic {
                                 return None;
                             }
 
-                            collect_xor_args(inner_args, egraph, powerful_xor_args, Some(arg));
+                            collect_xor_args(&inner_args, egraph, powerful_xor_args, Some(arg));
+                        // } else if let Logic::Not(not_arg) = egraph.get_optimized_logic(arg) {
+                        //     *wrap_in_not = !*wrap_in_not;
+                        //     // TODO: not chains
+                        //     if powerful_xor_args.contains(&not_arg) {
+                        //         powerful_xor_args.remove(&not_arg);
+                        //     } else {
+                        //         powerful_xor_args.insert(not_arg);
+                        //     }
+                        // }
                         } else if powerful_xor_args.contains(&arg) {
                             powerful_xor_args.remove(&arg);
                         } else {
@@ -64,15 +96,13 @@ impl Logic {
                 assert!(!args.is_empty());
 
                 let mut powerful_xor_args = FxHashSet::default();
+                // let mut wrap_in_not = false;
 
                 if collect_xor_args(args, egraph, &mut powerful_xor_args, None).is_some() {
                     if powerful_xor_args.is_empty() {
                         Self::Const(false)
                     } else if powerful_xor_args.len() == 1 {
-                        egraph[powerful_xor_args.into_iter().next().unwrap()]
-                            .data
-                            .optimized
-                            .clone()
+                        egraph.get_optimized_logic(powerful_xor_args.into_iter().next().unwrap())
                     } else {
                         Self::Xor(powerful_xor_args.into_iter().sorted_unstable().collect())
                     }
@@ -83,12 +113,12 @@ impl Logic {
             Self::And(args) => {
                 fn collect_and_args(
                     args: &[Id],
-                    egraph: &EGraph<Logic, LogicConstantFolding>,
+                    egraph: &EGraphRef,
                     unique_and_args: &mut FxHashSet<Id>,
                     my_id: Option<Id>,
                 ) -> Option<()> {
                     for arg in args.iter().map(|a| egraph.find(*a)) {
-                        match &egraph[arg].data.optimized {
+                        match egraph.get_optimized_logic(arg) {
                             Logic::And(inner_args) => {
                                 if inner_args
                                     .iter()
@@ -98,7 +128,7 @@ impl Logic {
                                     return None;
                                 }
 
-                                collect_and_args(inner_args, egraph, unique_and_args, Some(arg))?;
+                                collect_and_args(&inner_args, egraph, unique_and_args, Some(arg))?;
                             }
                             Logic::Const(true) => {}
                             _ => {
@@ -118,15 +148,12 @@ impl Logic {
                         // the only arg was in and is true
                         Self::Const(true)
                     } else if unique_and_args.len() == 1 {
-                        egraph[unique_and_args.into_iter().next().unwrap()]
-                            .data
-                            .optimized
-                            .clone()
+                        egraph.get_optimized_logic(unique_and_args.into_iter().next().unwrap())
                     } else if unique_and_args
                         .iter()
-                        .any(|a| egraph[*a].data.optimized == Self::Const(false))
+                        .any(|a| egraph.get_optimized_logic(*a) == Self::Const(false))
                         || unique_and_args.iter().any(|and_arg| {
-                            if let Self::Not(not_arg) = egraph[*and_arg].data.optimized
+                            if let Self::Not(not_arg) = egraph.get_optimized_logic(*and_arg)
                                 && unique_and_args.contains(&egraph.find(not_arg))
                             {
                                 true
@@ -143,8 +170,8 @@ impl Logic {
                     self.clone()
                 }
             }
-            Self::Not(arg) => match egraph[*arg].data.optimized.clone() {
-                Self::Not(arg_in_not) => egraph[arg_in_not].data.optimized.clone(),
+            Self::Not(arg) => match egraph.get_optimized_logic(*arg) {
+                Self::Not(arg_in_not) => egraph.get_optimized_logic(arg_in_not),
                 Self::Const(constant) => Self::Const(!constant),
                 _ => self.clone(),
             },
@@ -152,10 +179,10 @@ impl Logic {
         }
     }
 
-    fn _unmerge(&self, egraph: &mut EGraph<Self, LogicConstantFolding>) -> Option<Id> {
+    fn _unmerge(&self, egraph: &mut EGraph<Self, Analyzer>) -> Option<Id> {
         match self {
             Self::Xor(args) => {
-                fn split(egraph: &mut EGraph<Logic, LogicConstantFolding>, ids: &[Id]) -> Id {
+                fn split(egraph: &mut EGraph<Logic, Analyzer>, ids: &[Id]) -> Id {
                     if ids.len() == 2 {
                         egraph.add(Logic::Xor(ids.to_vec().into_boxed_slice()))
                     } else {
@@ -191,7 +218,7 @@ impl FromStr for ArgInfo {
     }
 }
 
-fn make_rules() -> Vec<Rewrite<Logic, LogicConstantFolding>> {
+fn make_rules() -> Vec<Rewrite<Logic, Analyzer>> {
     use egg::rewrite as rw;
     vec![
         // Commutable
@@ -221,7 +248,8 @@ fn make_rules() -> Vec<Rewrite<Logic, LogicConstantFolding>> {
         rw!("cancel-xor-not-not"; "(^ (! ?a) (! ?b))" => "(^ ?a ?b)"),
         // rw!("create-xor-not-not"; "(^ ?a ?b)" => "(^ (! ?a) (! ?b))"),
         rw!("not-xor-xor-not"; "(! (^ ?a ?b))" => "(^ (! ?a) ?b)"),
-        rw!("xor-aandb-aandnotb"; "(^ (& ?a ?b) (& ?a (! ?b)))" => "(?a)"),
+        rw!("xor-aandb-aandnotb"; "(^ (& ?a ?b) (& ?a (! ?b)))" => "?a"),
+        rw!("xor-aandb-notaandnotb"; "(^ (& ?a ?b) (& (! ?a) (! ?b)))" => "(! (^ ?a ?b))"),
     ]
 }
 
@@ -232,8 +260,8 @@ struct LogicFoldingData {
 }
 
 #[derive(Default)]
-struct LogicConstantFolding;
-impl Analysis<Logic> for LogicConstantFolding {
+struct Analyzer;
+impl Analysis<Logic> for Analyzer {
     type Data = LogicFoldingData;
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
@@ -255,7 +283,7 @@ impl Analysis<Logic> for LogicConstantFolding {
         };
 
         let mut value = make_value();
-        let optimized = enode.clone().optimize(egraph);
+        let optimized = enode.clone().optimize(&EGraphRef::Immutable(egraph));
 
         if let Logic::Const(c) = &optimized {
             if let Some(v) = value {
@@ -285,23 +313,17 @@ impl Analysis<Logic> for LogicConstantFolding {
 
 pub struct XorMinimizerCost;
 
-impl LpCostFunction<Logic, LogicConstantFolding> for XorMinimizerCost {
-    fn node_cost(
-        &mut self,
-        _egraph: &EGraph<Logic, LogicConstantFolding>,
-        _eclass: Id,
-        enode: &Logic,
-    ) -> f64 {
+impl<A: Analysis<Logic>> LpCostFunction<Logic, A> for XorMinimizerCost {
+    #[allow(clippy::cast_precision_loss)]
+    fn node_cost(&mut self, _egraph: &EGraph<Logic, A>, _eclass: Id, enode: &Logic) -> f64 {
         #[allow(clippy::match_same_arms)]
         match enode {
-            Logic::Xor(_srcs) => {
-                // let a = egraph.id_to_expr(*a);
-                // let b = egraph.id_to_expr(*b);
-
-                // egraph.
-                512.0
+            Logic::Xor(src) => {
+                8.0f64.mul_add(src.len() as f64, 512.0)
             }
-            Logic::And(..) => 32.0,
+            Logic::And(src) => {
+                16.0f64.mul_add(src.len() as f64, 32.0)
+            },
             Logic::Not(..) => 2.0,
             Logic::Register(..) => 0.1,
             Logic::Const(..) => 0.1,
@@ -310,13 +332,7 @@ impl LpCostFunction<Logic, LogicConstantFolding> for XorMinimizerCost {
     }
 }
 
-pub struct Logificator {
-    egraph: EGraph<Logic, LogicConstantFolding>,
-    op_expr: RecExpr<Op>,
-    op_cache: FxHashMap<Id, Vec<Id>>,
-}
-
-fn build_add(egraph: &mut EGraph<Logic, LogicConstantFolding>, a: &[Id], b: &[Id]) -> Vec<Id> {
+fn build_add(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
     let mut c = None;
 
     let mut bits = a
@@ -351,7 +367,7 @@ fn build_add(egraph: &mut EGraph<Logic, LogicConstantFolding>, a: &[Id], b: &[Id
     bits
 }
 
-fn build_mul(egraph: &mut EGraph<Logic, LogicConstantFolding>, a: &[Id], b: &[Id]) -> Vec<Id> {
+fn build_mul(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
     b.iter()
         .enumerate()
         .map(|(idx, b_bit)| {
@@ -366,30 +382,53 @@ fn build_mul(egraph: &mut EGraph<Logic, LogicConstantFolding>, a: &[Id], b: &[Id
         .fold(vec![], |acc, x| build_add(egraph, &acc, &x))
 }
 
+pub struct Logificator {
+    egraph: EGraph<Logic, ()>,
+    op_expr: RecExpr<Op>,
+    op_cache: FxHashMap<Id, Vec<Id>>,
+}
+
 impl Logificator {
     pub fn new(expr: RecExpr<Op>) -> Self {
         Self {
-            egraph: EGraph::new(LogicConstantFolding),
+            egraph: EGraph::new(()),
             op_expr: expr,
             op_cache: FxHashMap::default(),
         }
     }
 
     pub fn build_logic(mut self) -> RecExpr<Logic> {
+        // Pass 1: dead nodes cleanup
         let return_ids = self.get_logificated(Id::from(self.op_expr.as_ref().len() - 1));
         let return_logic = Logic::Register(return_ids.into_boxed_slice());
         let return_id = self.egraph.add(return_logic);
+        let cleaned_expr = crate::extract::extract(&self.egraph, return_id, &mut XorMinimizerCost);
 
+        // Pass 2: heuristic optimization with fast extractor
         let mut runner = Runner::default()
-            .with_egraph(self.egraph)
+            .with_expr(&cleaned_expr)
             .with_time_limit(std::time::Duration::from_secs(3600))
             .with_node_limit(50_000)
-            .with_iter_limit(100);
-        runner.roots.push(return_id);
-
+            .with_iter_limit(100)
+            .with_hook(|runner| {
+                let classes = runner
+                    .egraph
+                    .classes()
+                    .map(|e| (e.id, e.nodes.clone()))
+                    .collect_vec();
+                for (eclass_id, eclass_nodes) in classes {
+                    for node in eclass_nodes {
+                        let optimized = node.optimize(&EGraphRef::Mutable(&mut runner.egraph));
+                        let optimized_id = runner.egraph.add(optimized.clone());
+                        runner.egraph.union(eclass_id, optimized_id);
+                        // runner.egraph[optimized_id].data.optimized = optimized;
+                    }
+                }
+                runner.egraph.rebuild();
+                Ok(())
+            });
         runner = runner.run(&make_rules());
-
-        let expr = crate::extract::extract(&runner.egraph, runner.roots[0], &mut XorMinimizerCost);
+        crate::extract::extract(&runner.egraph, runner.roots[0], &mut XorMinimizerCost)
 
         // let xors = expr
         //     .as_ref()
@@ -399,11 +438,11 @@ impl Logificator {
 
         // println!("Simplified to len {}, xors: {}", expr.as_ref().len(), xors);
 
-        let mut gr = EGraph::new(());
-        gr.add_expr(&expr);
+        // let mut gr = EGraph::new(());
+        // gr.add_expr(&expr);
         // gr.dot().to_dot("bits.dot").unwrap();
 
-        expr
+        // expr
     }
 
     fn get_logificated(&mut self, id: Id) -> Vec<Id> {

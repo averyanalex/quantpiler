@@ -30,6 +30,7 @@ python = ["pyo3"]
 
 [profile.release]
 lto = "thin"
+overflow-checks = true
 
 [profile.dev]
 opt-level = 1
