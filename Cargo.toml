@@ -4,6 +4,7 @@ version = "0.3.5"
 authors = ["Alexander Averyanov <alex@averyan.ru>"]
 edition = "2021"
 description = "Сompiler of classical algorithms into oracles for quantum computing"
+readme = "README.md"
 repository = "https://github.com/averyanalex/quantpiler"
 license = "AGPL-3.0-or-later"
 categories = ["compilers", "science"]
@@ -37,3 +38,6 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+[package.metadata.docs.rs]
+all-features = true

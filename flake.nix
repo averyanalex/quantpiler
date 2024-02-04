@@ -23,7 +23,7 @@
       in {
         devShells = {
           default = pkgs.mkShell {
-            buildInputs = [rust pkgs.alejandra];
+            buildInputs = [rust pkgs.alejandra pkgs.python3];
             LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath [
               pkgs.stdenv.cc.cc
             ]}";

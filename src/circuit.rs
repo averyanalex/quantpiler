@@ -40,15 +40,15 @@ pub struct QubitRegister(pub QubitRegisterEnum);
 #[cfg(feature = "python")]
 #[pymethods]
 impl QubitRegister {
-    fn is_result(&self) -> bool {
+    const fn is_result(&self) -> bool {
         matches!(self.0, QubitRegisterEnum::Result)
     }
 
-    fn is_ancillary(&self) -> bool {
+    const fn is_ancillary(&self) -> bool {
         matches!(self.0, QubitRegisterEnum::Ancillary)
     }
 
-    fn is_argument(&self) -> bool {
+    const fn is_argument(&self) -> bool {
         matches!(self.0, QubitRegisterEnum::Argument(..))
     }
 
@@ -91,7 +91,7 @@ impl Circuit {
 
         for descs in map.values() {
             for desc in descs {
-                assert!(!desc.reg.is_ancillary())
+                assert!(!desc.reg.is_ancillary());
             }
         }
 
@@ -113,7 +113,7 @@ impl Circuit {
         list.sort_unstable_by_key(|x| x.0.index);
 
         for (idx, (q, _)) in list.iter().enumerate() {
-            assert_eq!(idx, q.index as usize)
+            assert_eq!(idx, q.index as usize);
         }
 
         list

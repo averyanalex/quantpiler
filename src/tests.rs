@@ -1,136 +1,125 @@
-use crate::{compile, expression::Expression};
+use crate::expression::Expression;
 
 #[test]
 fn crc32() {
-    fn table(ch: &Expression) -> Expression {
+    fn table(ch: Expression) -> Expression {
         let poly = 0xEDB8_8320_u32;
 
         (0..8u32)
-            .map(|i| ch.clone() >> i)
-            .fold(ch.constant(0u32), |table, ch| {
-                ((ch ^ table.clone()) & 1u32)
-                    .ternary(&((table.clone() >> 1u32) ^ poly), &(table >> 1u32))
+            .map(|i| ch >> i)
+            .fold(Expression::constant(0u32), |table, ch| {
+                ((ch ^ table) & 1u32).ternary((table >> 1u32) ^ poly, table >> 1u32)
             })
     }
 
     let size = 32;
 
-    let input = Expression::new_argument("input", size);
-    let mut value = input.constant(0xFFFF_FFFF_u32);
+    let input = Expression::argument("input", size);
+    let mut value = Expression::constant(0xFFFF_FFFF_u32);
 
-    for byte in (0..(size / 8)).map(|i| (input.clone() >> (i * 8)) & 0xFFu32) {
-        let ch = (byte ^ value.clone()) & 0xFFu32;
-        value = table(&ch) ^ (value >> 8u32);
+    for byte in (0..(size / 8)).map(|i| (input >> (i * 8)) & 0xFFu32) {
+        let ch = (byte ^ value) & 0xFFu32;
+        value = table(ch) ^ (value >> 8u32);
     }
 
-    compile(&value);
+    value.compile();
 }
 
 #[test]
 fn example() {
-    let a = Expression::new_argument("input", 3);
-    let b = a.argument("b", 2);
+    let a = Expression::argument("input", 3);
+    let b = Expression::argument("b", 2);
     let add = a + b;
     let xor = add ^ 0b100u32;
     let and_const = xor & 0b111u32;
 
-    compile(&and_const);
+    and_const.compile();
 }
 
 #[test]
 fn apowxmodn() {
     let x_len = 3;
-    let x = Expression::new_argument("x", 3);
+    let x = Expression::argument("x", 3);
 
     let a = 5u32;
 
-    let prod = (0..x_len).fold(x.constant(1u32), |acc, i| {
-        ((x.clone() >> i) & 1u32).ternary(&(acc.clone() * a.pow(2u32.pow(i))), &acc) & 0b1111u32
+    let prod = (0..x_len).fold(Expression::constant(1u32), |acc, i| {
+        ((x >> i) & 1u32).ternary(acc * a.pow(2u32.pow(i)), acc) & 0b1111u32
     });
 
-    compile(&prod);
+    prod.compile();
 }
 
 #[test]
 fn add() {
-    let a = Expression::new_argument("a", 32);
-    compile(&(a.clone() + a.argument("b", 16)));
+    (Expression::argument("a", 32) + Expression::argument("b", 16)).compile();
 }
 
 #[test]
 fn many_add() {
-    let a = Expression::new_argument("a", 32);
-    compile(
-        &(a.clone()
-            + a.argument("b", 20)
-            + a.argument("c", 27)
-            + a.argument("d", 10)
-            + a.argument("e", 24)),
-    );
+    (Expression::argument("a", 32)
+        + Expression::argument("b", 20)
+        + Expression::argument("c", 27)
+        + Expression::argument("d", 10)
+        + Expression::argument("e", 24))
+    .compile();
 }
 
 #[test]
 fn mul() {
-    let a = Expression::new_argument("a", 16);
-    compile(&(a.clone() * a.argument("b", 8)));
+    (Expression::argument("a", 16) * Expression::argument("b", 8)).compile();
 }
 
 #[test]
 fn many_mul() {
-    let a = Expression::new_argument("a", 10);
-    compile(&(a.clone() * a.argument("b", 8) * a.argument("c", 2) * a.argument("d", 5)));
+    (Expression::argument("a", 10)
+        * Expression::argument("b", 8)
+        * Expression::argument("c", 2)
+        * Expression::argument("d", 5))
+    .compile();
 }
 
 #[test]
 fn and() {
-    let a = Expression::new_argument("a", 32);
-    compile(&(a.clone() & a.argument("b", 16)));
+    (Expression::argument("a", 32) & Expression::argument("b", 16)).compile();
 }
 
 #[test]
 fn many_and() {
-    let a = Expression::new_argument("a", 32);
-    compile(
-        &(a.clone()
-            & a.argument("b", 20)
-            & a.argument("c", 27)
-            & a.argument("d", 10)
-            & a.argument("e", 24)),
-    );
+    (Expression::argument("a", 32)
+        & Expression::argument("b", 20)
+        & Expression::argument("c", 27)
+        & Expression::argument("d", 10)
+        & Expression::argument("e", 24))
+    .compile();
 }
 
 #[test]
 fn or() {
-    let a = Expression::new_argument("a", 32);
-    compile(&(a.clone() | a.argument("b", 16)));
+    (Expression::argument("a", 32) | Expression::argument("b", 16)).compile();
 }
 
 #[test]
 fn many_or() {
-    let a = Expression::new_argument("a", 32);
-    compile(
-        &(a.clone()
-            | a.argument("b", 20)
-            | a.argument("c", 27)
-            | a.argument("d", 10)
-            | a.argument("e", 24)),
-    );
+    (Expression::argument("a", 32)
+        | Expression::argument("b", 20)
+        | Expression::argument("c", 27)
+        | Expression::argument("d", 10)
+        | Expression::argument("e", 24))
+    .compile();
 }
 
 #[test]
 fn xor() {
-    let a = Expression::new_argument("a", 32);
-    compile(&(a.clone() ^ a.argument("b", 16)));
+    (Expression::argument("a", 32) ^ Expression::argument("b", 16)).compile();
 }
 
 #[test]
 fn many_xor() {
-    let a = Expression::new_argument("a", 32);
-    compile(
-        &(a.clone()
-            ^ a.argument("b", 20)
-            ^ a.argument("c", 27)
-            ^ a.argument("d", 10)
-            ^ a.argument("e", 24)),
-    );
+    (Expression::argument("a", 32)
+        ^ Expression::argument("b", 20)
+        ^ Expression::argument("c", 27)
+        ^ Expression::argument("d", 10)
+        ^ Expression::argument("e", 24))
+    .compile();
 }

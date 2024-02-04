@@ -7,6 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::{extract::LpCostFunction, op::Op};
 
 define_language! {
+    /// Logic language
     pub enum Logic {
         // ^ (XOR) logic gate, commutable
         "^" = Xor(Box<[Id]>),
@@ -16,14 +17,14 @@ define_language! {
         "!" = Not(Id),
         // merge gates into register, useful for return op
         "r" = Register(Box<[Id]>),
-        // just constant value
+        // constant value
         Const(bool),
         // argument qubit
         Arg(ArgInfo),
     }
 }
 
-enum EGraphRef<'a> {
+pub enum EGraphRef<'a> {
     Immutable(&'a EGraph<Logic, Analyzer>),
     Mutable(&'a mut EGraph<Logic, Analyzer>),
 }
@@ -45,7 +46,12 @@ impl<'a> EGraphRef<'a> {
 }
 
 impl Logic {
-    fn optimize(mut self, egraph: &EGraphRef) -> Self {
+    /// Tries to optimize logic gate and returns optimized version. Can modify
+    /// egraph if mutable ``EGraph`` reference is provided.
+    ///
+    /// Merges XORs in XOR, removes same AND args, etc.
+    #[must_use]
+    pub fn optimize(mut self, egraph: &EGraphRef) -> Self {
         if !matches!(self, Self::Register(..)) {
             for child in self.children_mut() {
                 *child = egraph.find(*child);
@@ -63,7 +69,6 @@ impl Logic {
                     // wrap_in_not: &mut bool,
                     my_id: Option<Id>,
                 ) -> Option<()> {
-
                     for arg in args.iter().map(|a| egraph.find(*a)) {
                         if let Logic::Xor(inner_args) = egraph.get_optimized_logic(arg) {
                             if inner_args
@@ -198,9 +203,12 @@ impl Logic {
     }
 }
 
+/// Represents qubit in argument
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ArgInfo {
+    /// Name of argument with qubit
     pub name: String,
+    /// Index of qubit in argument
     pub index: u32,
 }
 
@@ -254,15 +262,15 @@ fn make_rules() -> Vec<Rewrite<Logic, Analyzer>> {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct LogicFoldingData {
+pub struct AnalyzerData {
     value: Option<bool>,
     optimized: Logic,
 }
 
 #[derive(Default)]
-struct Analyzer;
+pub struct Analyzer;
 impl Analysis<Logic> for Analyzer {
-    type Data = LogicFoldingData;
+    type Data = AnalyzerData;
 
     fn merge(&mut self, to: &mut Self::Data, from: Self::Data) -> DidMerge {
         egg::merge_max(to, from)
@@ -293,7 +301,7 @@ impl Analysis<Logic> for Analyzer {
             }
         }
 
-        LogicFoldingData { value, optimized }
+        AnalyzerData { value, optimized }
     }
 
     fn modify(egraph: &mut EGraph<Logic, Self>, id: Id) {
@@ -318,12 +326,8 @@ impl<A: Analysis<Logic>> LpCostFunction<Logic, A> for XorMinimizerCost {
     fn node_cost(&mut self, _egraph: &EGraph<Logic, A>, _eclass: Id, enode: &Logic) -> f64 {
         #[allow(clippy::match_same_arms)]
         match enode {
-            Logic::Xor(src) => {
-                8.0f64.mul_add(src.len() as f64, 512.0)
-            }
-            Logic::And(src) => {
-                16.0f64.mul_add(src.len() as f64, 32.0)
-            },
+            Logic::Xor(src) => 8.0f64.mul_add(src.len() as f64, 512.0),
+            Logic::And(src) => 16.0f64.mul_add(src.len() as f64, 32.0),
             Logic::Not(..) => 2.0,
             Logic::Register(..) => 0.1,
             Logic::Const(..) => 0.1,
@@ -332,7 +336,8 @@ impl<A: Analysis<Logic>> LpCostFunction<Logic, A> for XorMinimizerCost {
     }
 }
 
-fn build_add(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
+/// Generates `a + b`.
+pub fn build_add(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
     let mut c = None;
 
     let mut bits = a
@@ -367,7 +372,8 @@ fn build_add(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
     bits
 }
 
-fn build_mul(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
+/// Generates `a * b`.
+pub fn build_mul(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
     b.iter()
         .enumerate()
         .map(|(idx, b_bit)| {
@@ -382,6 +388,8 @@ fn build_mul(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
         .fold(vec![], |acc, x| build_add(egraph, &acc, &x))
 }
 
+/// Takes ``RecExpr<Op>`` and builds ``RecExpr<Logic>``. Generates logic gates
+/// expression for each bit of root [Op].
 pub struct Logificator {
     egraph: EGraph<Logic, ()>,
     op_expr: RecExpr<Op>,
@@ -389,6 +397,7 @@ pub struct Logificator {
 }
 
 impl Logificator {
+    /// Initialize `Logificator` with [``RecExpr<Op>``].
     pub fn new(expr: RecExpr<Op>) -> Self {
         Self {
             egraph: EGraph::new(()),
@@ -445,7 +454,7 @@ impl Logificator {
         // expr
     }
 
-    fn get_logificated(&mut self, id: Id) -> Vec<Id> {
+    pub fn get_logificated(&mut self, id: Id) -> Vec<Id> {
         if let Some(bits) = self.op_cache.get(&id) {
             bits.clone()
         } else {

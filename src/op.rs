@@ -46,9 +46,22 @@ define_language! {
     }
 }
 
+// fn biguint_to_bitvec(v: &BigUint) -> Vec<bool> {
+//     let v = u64::try_from(v.clone()).unwrap();
+//     (0..64)
+//         .map(|i| ((v >> i) & 1) == 1)
+//         .rev()
+//         .skip_while(|x| !x)
+//         .collect_vec()
+//         .into_iter()
+//         .rev()
+//         .collect_vec()
+// }
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AnalyzerData {
     value: Option<BigUint>,
+    // length: u32,
 }
 
 #[derive(Default, Clone)]
@@ -61,50 +74,69 @@ impl Analysis<Op> for Analyzer {
     }
 
     fn make(egraph: &EGraph<Op, Self>, enode: &Op) -> Self::Data {
-        let make_value = || {
-            let x = |i: &Id| egraph[*i].data.value.clone();
-            match enode {
-                Op::Not(a) => Some({
-                    let digits = x(a)?.iter_u64_digits().map(|d| !d).collect_vec();
-                    assert_eq!(digits.len(), 1);
-                    BigUint::from_u64(!digits[0]).unwrap()
-                }),
-                Op::Xor([a, b]) => Some(x(a)? ^ x(b)?),
-                Op::Or([a, b]) => Some(x(a)? | x(b)?),
-                Op::And([a, b]) => Some(x(a)? & x(b)?),
-                Op::Shr([target, distance]) => {
-                    Some(x(target)? >> u128::try_from(x(distance)?).unwrap())
-                }
-                Op::Shl([target, distance]) => {
-                    Some(x(target)? << u128::try_from(x(distance)?).unwrap())
-                }
-                Op::Add([a, b]) => Some(x(a)? + x(b)?),
-                Op::Sub([a, b]) => Some(x(a)? - x(b)?),
-                Op::Mul([a, b]) => Some(x(a)? * x(b)?),
-                Op::Div([a, b]) => Some(x(a)? / x(b)?),
-                Op::Rem([a, b]) => Some(x(a)? % x(b)?),
-                Op::Eq([a, b]) => Some({
-                    if x(a)? == x(b)? {
-                        BigUint::one()
-                    } else {
-                        BigUint::zero()
-                    }
-                }),
-                Op::Ternary([cond, then, or]) => Some({
-                    if x(cond)?.is_one() {
-                        x(then)?
-                    } else if x(cond)?.is_zero() {
-                        x(or)?
-                    } else {
-                        panic!("expected condition to be 1 or 0, got {}", x(cond)?)
-                    }
-                }),
-                Op::Constant(c) => Some(c.clone()),
-                Op::Argument(_) => None,
+        let x = |i: &Id| egraph[*i].data.value.clone();
+        let make_value = || match enode {
+            Op::Not(a) => Some({
+                let digits = x(a)?.iter_u64_digits().map(|d| !d).collect_vec();
+                assert_eq!(digits.len(), 1);
+                BigUint::from_u64(!digits[0]).unwrap()
+            }),
+            Op::Xor([a, b]) => Some(x(a)? ^ x(b)?),
+            Op::Or([a, b]) => Some(x(a)? | x(b)?),
+            Op::And([a, b]) => Some(x(a)? & x(b)?),
+            Op::Shr([target, distance]) => {
+                Some(x(target)? >> u128::try_from(x(distance)?).unwrap())
             }
+            Op::Shl([target, distance]) => {
+                Some(x(target)? << u128::try_from(x(distance)?).unwrap())
+            }
+            Op::Add([a, b]) => Some(x(a)? + x(b)?),
+            Op::Sub([a, b]) => Some(x(a)? - x(b)?),
+            Op::Mul([a, b]) => Some(x(a)? * x(b)?),
+            Op::Div([a, b]) => Some(x(a)? / x(b)?),
+            Op::Rem([a, b]) => Some(x(a)? % x(b)?),
+            Op::Eq([a, b]) => Some({
+                if x(a)? == x(b)? {
+                    BigUint::one()
+                } else {
+                    BigUint::zero()
+                }
+            }),
+            Op::Ternary([cond, then, or]) => Some({
+                if x(cond)?.is_one() {
+                    x(then)?
+                } else if x(cond)?.is_zero() {
+                    x(or)?
+                } else {
+                    panic!("expected condition to be 1 or 0, got {}", x(cond)?)
+                }
+            }),
+            Op::Constant(c) => Some(c.clone()),
+            Op::Argument(_) => None,
         };
-
         let value = make_value();
+
+        // let l = |i: &Id| egraph[*i].data.length;
+        // let length = match enode {
+        //     Op::Not(a) => l(a),
+        //     Op::Xor([a, b]) | Op::Or([a, b]) => l(a).max(l(b)),
+        //     Op::And([a, b]) => l(a).min(l(b)),
+        //     Op::Shr([target, distance]) => l(target).saturating_sub(
+        //         u32::try_from(x(distance).expect("bitshift distance must be constant")).unwrap(),
+        //     ),
+        //     Op::Shl([target, distance]) => l(target).saturating_add(
+        //         u32::try_from(x(distance).expect("bitshift distance must be constant")).unwrap(),
+        //     ),
+        //     Op::Add([a, b]) => l(a).max(l(b)).saturating_add(1),
+        //     Op::Sub(_) => todo!(),
+        //     Op::Mul([a, b]) => l(a).saturating_add(l(b)),
+        //     Op::Div(_) => todo!(),
+        //     Op::Rem(_) => todo!(),
+        //     Op::Eq(_) => todo!(),
+        //     Op::Ternary([_, then, or]) => l(then).max(l(or)),
+        //     Op::Constant(c) => biguint_to_bitvec(c).len() as u32,
+        //     Op::Argument(a) => a.size,
+        // };
 
         Self::Data { value }
     }
@@ -156,11 +188,13 @@ pub fn make_rules() -> Vec<Rewrite<Op, Analyzer>> {
         rw!("cancel-xor-not-not"; "(^ (! ?a) (! ?b))" => "(^ ?a ?b)"),
         rw!("not-xor-xor-not"; "(! (^ ?a ?b))" => "(^ (! ?a) ?b)"),
         rw!("create-mul-one"; "?a" => "(* ?a 1)"),
-        rw!("merge-add-muls"; "(+ ?a (* ?a ?b))" => "(* ?a (+ 1 ?b))")
+        rw!("merge-add-muls"; "(+ ?a (* ?a ?b))" => "(* ?a (+ 1 ?b))"),
     ];
 
     // Distributivity
-    rules.append(&mut [rw!("distr-mul-add"; "(* (+ ?a ?b) ?c)" <=> "(+ (* ?a ?c) (* ?b ?c))")].concat());
+    rules.append(
+        &mut [rw!("distr-mul-add"; "(* (+ ?a ?b) ?c)" <=> "(+ (* ?a ?c) (* ?b ?c))")].concat(),
+    );
 
     rules
 }
@@ -168,24 +202,27 @@ pub fn make_rules() -> Vec<Rewrite<Op, Analyzer>> {
 pub struct Cost;
 
 impl LpCostFunction<Op, Analyzer> for Cost {
-    fn node_cost(&mut self, _egraph: &EGraph<Op, Analyzer>, _eclass: Id, enode: &Op) -> f64 {
+    fn node_cost(&mut self, _egraph: &EGraph<Op, Analyzer>, _id: Id, enode: &Op) -> f64 {
+        // let l = f64::from(egraph[id].data.length);
+        let l = 1.0;
+
         #[allow(clippy::match_same_arms)]
         match enode {
-            Op::Not(_) => 1.0,
-            Op::Xor(_) => 4.0,
-            Op::Or(_) => 8.0,
-            Op::And(_) => 6.0,
-            Op::Shr(_) => 0.5,
-            Op::Shl(_) => 0.5,
-            Op::Add(_) => 16.0,
-            Op::Sub(_) => 18.0,
-            Op::Mul(_) => 32.0,
-            Op::Div(_) => 32.0,
-            Op::Rem(_) => 24.0,
-            Op::Eq(_) => 32.0,
-            Op::Ternary(_) => 8.0,
-            Op::Constant(_) => 0.1,
-            Op::Argument(_) => 0.1,
+            Op::Not(_) => 1.0 * l,
+            Op::Xor(_) => 4.0 * l,
+            Op::Or(_) => 8.0 * l,
+            Op::And(_) => 6.0 * l,
+            Op::Shr(_) => 0.2 * l,
+            Op::Shl(_) => 0.4 * l,
+            Op::Add(_) => 32.0 * l,
+            Op::Sub(_) => todo!(),
+            Op::Mul(_) => 128.0 * l,
+            Op::Div(_) => todo!(),
+            Op::Rem(_) => todo!(),
+            Op::Eq(_) => todo!(),
+            Op::Ternary(_) => 16.0 * l,
+            Op::Constant(_) => 0.1 * l,
+            Op::Argument(_) => 0.1 * l,
         }
     }
 }

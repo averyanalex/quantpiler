@@ -1,6 +1,5 @@
-#[cfg(feature = "python")]
 use std::sync::LazyLock;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use egg::*;
 use num::BigUint;
@@ -11,96 +10,86 @@ use pyo3::prelude::*;
 use crate::circuit::Circuit;
 use crate::op::{make_rules, Analyzer, ArgumentInfo, Cost, Op};
 
-#[derive(Clone)]
-pub struct Expression {
-    id: Id,
-    egraph: Arc<Mutex<EGraph<Op, Analyzer>>>,
-}
+static OP_EGRAPH: LazyLock<Mutex<EGraph<Op, Analyzer>>> =
+    LazyLock::new(|| Mutex::new(EGraph::new(Analyzer)));
+
+/// Combination of operations on arguments and constants
+#[derive(Clone, Copy)]
+pub struct Expression(Id);
 
 impl Expression {
-    pub fn new_argument<N: Into<String>>(name: N, size: u32) -> Self {
-        let egraph = Arc::new(Mutex::new(EGraph::new(Analyzer)));
-        let id = egraph.lock().unwrap().add(Op::Argument(ArgumentInfo {
+    /// Create new argument.
+    ///
+    /// You can't use arguments with the same `name` but diffirent `size` in the same [Expression].
+    #[must_use]
+    pub fn argument<N: Into<String>>(name: N, size: u32) -> Self {
+        Self(OP_EGRAPH.lock().unwrap().add(Op::Argument(ArgumentInfo {
             size,
             name: name.into(),
-        }));
-        Self { id, egraph }
+        })))
     }
 
-    pub fn new_constant<T: Into<BigUint>>(value: T) -> Self {
-        let egraph = Arc::new(Mutex::new(EGraph::new(Analyzer)));
-        let id = egraph.lock().unwrap().add(Op::Constant(value.into()));
-        Self { id, egraph }
+    /// Create new constant.
+    ///
+    /// You can use any [`Into<BigUint>`] value.
+    #[must_use]
+    pub fn constant<T: Into<BigUint>>(value: T) -> Self {
+        Self(OP_EGRAPH.lock().unwrap().add(Op::Constant(value.into())))
     }
 
-    pub fn build(&self) -> RecExpr<Op> {
+    /// Build ternary operation. [Expression] will be `then` if `self` is \[true\] and `or` otherwise.
+    ///
+    /// This can emulate something like
+    /// ```
+    /// if expr { then } else { or }
+    /// ```
+    #[must_use]
+    pub fn ternary<T1: IntoId, T2: IntoId>(self, then: T1, or: T2) -> Self {
+        let ids = [self.id(), then.id(), or.id()];
+        Self(OP_EGRAPH.lock().unwrap().add(Op::Ternary(ids)))
+    }
+
+    #[must_use]
+    pub fn build(self) -> RecExpr<Op> {
+        let egraph = OP_EGRAPH.lock().unwrap().clone();
+        let cleaned_expr = crate::extract::extract(&egraph, self.id(), &mut Cost);
+
         let mut runner = Runner::default()
-            .with_egraph(self.egraph.lock().unwrap().clone())
+            .with_expr(&cleaned_expr)
             .with_time_limit(std::time::Duration::from_secs(3600))
             .with_node_limit(50_000)
             .with_iter_limit(100);
-        runner.roots.push(self.id);
-
         runner = runner.run(&make_rules());
-
         crate::extract::extract(&runner.egraph, runner.roots[0], &mut Cost)
     }
 
-    #[must_use]
-    pub fn argument<N: Into<String>>(&self, name: N, size: u32) -> Self {
-        let id = self.egraph.lock().unwrap().add(Op::Argument(ArgumentInfo {
-            size,
-            name: name.into(),
-        }));
-        Self {
-            id,
-            egraph: self.egraph.clone(),
-        }
-    }
+    /// Compile expression into quantum circuit
+    pub fn compile(self) -> crate::circuit::Circuit {
+        let op = self.build();
+        let logic = crate::logic::Logificator::new(op.clone()).build_logic();
+        let circuit = crate::compiler::Compiler::new(&logic).compile();
 
-    #[must_use]
-    pub fn constant<T: Into<BigUint>>(&self, value: T) -> Self {
-        let id = self.egraph.lock().unwrap().add(Op::Constant(value.into()));
-        Self {
-            id,
-            egraph: self.egraph.clone(),
-        }
-    }
+        // println!("Qubits: {}", circuit.qubits_count);
 
-    #[must_use]
-    pub fn ternary<T1: IntoId, T2: IntoId>(&self, then: &T1, or: &T2) -> Self {
-        let then_id = then.id(&self.egraph);
-        let or_id = or.id(&self.egraph);
+        crate::verify::verify(&op, &logic, &circuit);
 
-        let id = self
-            .egraph
-            .lock()
-            .unwrap()
-            .add(Op::Ternary([self.id, then_id, or_id]));
-        Self {
-            id,
-            egraph: self.egraph.clone(),
-        }
+        circuit
     }
 }
 
 pub trait IntoId {
-    fn id(&self, egraph: &Arc<Mutex<EGraph<Op, Analyzer>>>) -> Id;
+    fn id(self) -> Id;
 }
 
 impl IntoId for Expression {
-    fn id(&self, egraph: &Arc<Mutex<EGraph<Op, Analyzer>>>) -> Id {
-        assert!(Arc::ptr_eq(&self.egraph, egraph));
-        self.id
+    fn id(self) -> Id {
+        self.0
     }
 }
 
-impl<T: Into<BigUint> + Clone> IntoId for T {
-    fn id(&self, egraph: &Arc<Mutex<EGraph<Op, Analyzer>>>) -> Id {
-        egraph
-            .lock()
-            .unwrap()
-            .add(Op::Constant((*self).clone().into()))
+impl<T: Into<BigUint>> IntoId for T {
+    fn id(self) -> Id {
+        OP_EGRAPH.lock().unwrap().add(Op::Constant(self.into()))
     }
 }
 
@@ -108,11 +97,7 @@ impl std::ops::Not for Expression {
     type Output = Self;
 
     fn not(self) -> Self::Output {
-        let id = self.egraph.lock().unwrap().add(Op::Not(self.id));
-        Self {
-            id,
-            egraph: self.egraph,
-        }
+        Self(OP_EGRAPH.lock().unwrap().add(Op::Not(self.id())))
     }
 }
 
@@ -122,16 +107,8 @@ macro_rules! impl_op {
             type Output = Self;
 
             fn $op_func(self, rhs: T) -> Self::Output {
-                let rhs_id = rhs.id(&self.egraph);
-                let id = self
-                    .egraph
-                    .lock()
-                    .unwrap()
-                    .add(Op::$lang_op([self.id, rhs_id]));
-                Expression {
-                    id,
-                    egraph: self.egraph,
-                }
+                let ids = [self.id(), rhs.id()];
+                Self(OP_EGRAPH.lock().unwrap().add(Op::$lang_op(ids)))
             }
         }
     };
@@ -152,23 +129,20 @@ impl_op! {Div, div, Div}
 impl_op! {Rem, rem, Rem}
 
 #[cfg(feature = "python")]
-static ZERO_EXPR: LazyLock<Expression> = LazyLock::new(|| Expression::new_constant(0u32));
-
-#[cfg(feature = "python")]
 #[pyfunction]
 pub fn argument(name: String, size: u32) -> Expr {
-    Expr(ZERO_EXPR.argument(name, size))
+    Expr(Expression::argument(name, size))
 }
 
 #[cfg(feature = "python")]
 #[pyfunction]
 pub fn constant(value: u128) -> Expr {
-    Expr(ZERO_EXPR.constant(value))
+    Expr(Expression::constant(value))
 }
 
 #[cfg(feature = "python")]
 #[pyclass]
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Expr(Expression);
 
 #[cfg(feature = "python")]
@@ -182,7 +156,7 @@ enum RhsTypes {
 impl RhsTypes {
     fn expr(self) -> Expression {
         match self {
-            Self::Const(c) => ZERO_EXPR.constant(c),
+            Self::Const(c) => Expression::constant(c),
             Self::Expr(e) => e.0,
         }
     }
@@ -192,11 +166,11 @@ impl RhsTypes {
 #[pymethods]
 impl Expr {
     fn ternary(&self, then: RhsTypes, or: RhsTypes) -> Self {
-        Self(self.0.ternary(&then.expr(), &or.expr()))
+        Self(self.0.ternary(then.expr(), or.expr()))
     }
 
     fn compile(&self) -> Circuit {
-        crate::compile(&self.0)
+        self.0.compile()
     }
 
     fn __str__(&self) -> String {
@@ -220,11 +194,11 @@ impl Expr {
     // }
 
     fn __invert__(&self) -> Self {
-        Self(!self.0.clone())
+        Self(!self.0)
     }
 
     fn __xor__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() ^ rhs.expr())
+        Self(self.0 ^ rhs.expr())
     }
 
     fn __rxor__(&self, rhs: RhsTypes) -> Self {
@@ -236,7 +210,7 @@ impl Expr {
     }
 
     fn __or__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() | rhs.expr())
+        Self(self.0 | rhs.expr())
     }
 
     fn __ror__(&self, rhs: RhsTypes) -> Self {
@@ -248,7 +222,7 @@ impl Expr {
     }
 
     fn __and__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() & rhs.expr())
+        Self(self.0 & rhs.expr())
     }
 
     fn __rand__(&self, rhs: RhsTypes) -> Self {
@@ -260,7 +234,7 @@ impl Expr {
     }
 
     fn __rshift__(&self, rhs: u128) -> Self {
-        Self(self.0.clone() >> rhs)
+        Self(self.0 >> rhs)
     }
 
     fn __rrshift__(&self, rhs: u128) -> Self {
@@ -272,7 +246,7 @@ impl Expr {
     }
 
     fn __lshift__(&self, rhs: u128) -> Self {
-        Self(self.0.clone() << rhs)
+        Self(self.0 << rhs)
     }
 
     fn __rlshift__(&self, rhs: u128) -> Self {
@@ -284,7 +258,7 @@ impl Expr {
     }
 
     fn __add__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() + rhs.expr())
+        Self(self.0 + rhs.expr())
     }
 
     fn __radd__(&self, rhs: RhsTypes) -> Self {
@@ -296,7 +270,7 @@ impl Expr {
     }
 
     fn __sub__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() - rhs.expr())
+        Self(self.0 - rhs.expr())
     }
 
     fn __rsub__(&self, rhs: RhsTypes) -> Self {
@@ -308,7 +282,7 @@ impl Expr {
     }
 
     fn __mul__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() * rhs.expr())
+        Self(self.0 * rhs.expr())
     }
 
     fn __rmul__(&self, rhs: RhsTypes) -> Self {
@@ -320,7 +294,7 @@ impl Expr {
     }
 
     fn __floordiv__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() / rhs.expr())
+        Self(self.0 / rhs.expr())
     }
 
     fn __rfloordiv__(&self, rhs: RhsTypes) -> Self {
@@ -332,7 +306,7 @@ impl Expr {
     }
 
     fn __mod__(&self, rhs: RhsTypes) -> Self {
-        Self(self.0.clone() % rhs.expr())
+        Self(self.0 % rhs.expr())
     }
 
     fn __rmod__(&self, rhs: RhsTypes) -> Self {

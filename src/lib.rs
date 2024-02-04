@@ -16,26 +16,20 @@
     clippy::tuple_array_conversions
 )]
 
+/*!
+`quantpiler` (**quant**um com**piler**) is a compiler of classical algorithms into oracles for quantum computing.
+*/
+
 pub mod circuit;
 pub mod compiler;
-pub mod executor;
-pub mod expression;
-pub mod extract;
+mod executor;
+mod expression;
+mod extract;
 pub mod logic;
 pub mod op;
 mod verify;
 
-pub fn compile(expr: &expression::Expression) -> circuit::Circuit {
-    let op = expr.build();
-    let logic = logic::Logificator::new(op.clone()).build_logic();
-    let circuit = compiler::Compiler::new(&logic).compile();
-
-    // println!("Qubits: {}", circuit.qubits_count);
-
-    verify::verify(&op, &logic, &circuit);
-
-    circuit
-}
+pub use expression::Expression;
 
 #[cfg(test)]
 mod tests;
