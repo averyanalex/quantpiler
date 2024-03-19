@@ -52,7 +52,7 @@ impl Expression {
     #[must_use]
     pub fn build(self) -> RecExpr<Op> {
         let egraph = OP_EGRAPH.lock().unwrap().clone();
-        let cleaned_expr = crate::extract::extract(&egraph, self.id(), &mut Cost);
+        let cleaned_expr = crate::extract::extract(&egraph, self.id(), Cost);
 
         let mut runner = Runner::default()
             .with_expr(&cleaned_expr)
@@ -60,17 +60,17 @@ impl Expression {
             .with_node_limit(50_000)
             .with_iter_limit(100);
         runner = runner.run(&make_rules());
-        crate::extract::extract(&runner.egraph, runner.roots[0], &mut Cost)
+        crate::extract::extract(&runner.egraph, runner.roots[0], Cost)
     }
 
     /// Compile expression into quantum circuit
+    #[cfg(test)]
     pub fn compile(self) -> crate::circuit::Circuit {
         let op = self.build();
         let logic = crate::logic::Logificator::new(op.clone()).build_logic();
         let circuit = crate::compiler::Compiler::new(&logic).compile();
 
         // println!("Qubits: {}", circuit.qubits_count);
-
         crate::verify::verify(&op, &logic, &circuit);
 
         circuit

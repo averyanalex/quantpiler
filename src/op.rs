@@ -165,8 +165,10 @@ pub fn make_rules() -> Vec<Rewrite<Op, Analyzer>> {
         rw!("assoc-and"; "(& ?a (& ?b ?c))" => "(& (& ?a ?b) ?c)"),
         rw!("assoc-add"; "(+ ?a (+ ?b ?c))" => "(+ (+ ?a ?b) ?c)"),
         rw!("assoc-mul"; "(* ?a (* ?b ?c))" => "(* (* ?a ?b) ?c)"),
+        rw!("assoc-sub"; "(- ?a (- ?b ?c))" => "(+ (- ?a ?b) ?c)"),
         // Same elements logic
         rw!("xor-same"; "(^ ?a ?a)" => "0"),
+        rw!("sub-same"; "(- ?a ?a)" => "0"),
         // rw!("xor-same-not"; "(^ (! ?a) ?a)" => "1111"),
         rw!("or-same"; "(| ?a ?a)" => "?a"),
         // rw!("or-same-not"; "(| (! ?a) ?a)" => "1111"),
@@ -215,10 +217,10 @@ impl LpCostFunction<Op, Analyzer> for Cost {
             Op::Shr(_) => 0.2 * l,
             Op::Shl(_) => 0.4 * l,
             Op::Add(_) => 32.0 * l,
-            Op::Sub(_) => todo!(),
+            Op::Sub(_) => 64.0 * l, // == 2 * node_cost(Op::Add)
             Op::Mul(_) => 128.0 * l,
             Op::Div(_) => todo!(),
-            Op::Rem(_) => todo!(),
+            Op::Rem(_) => 256.0 * l,
             Op::Eq(_) => todo!(),
             Op::Ternary(_) => 16.0 * l,
             Op::Constant(_) => 0.1 * l,

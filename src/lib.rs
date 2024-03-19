@@ -22,11 +22,13 @@
 
 pub mod circuit;
 pub mod compiler;
+#[cfg(test)]
 mod executor;
 mod expression;
 mod extract;
 pub mod logic;
 pub mod op;
+#[cfg(test)]
 mod verify;
 
 pub use expression::Expression;

@@ -123,3 +123,14 @@ fn many_xor() {
         ^ Expression::argument("e", 24))
     .compile();
 }
+
+#[test]
+fn rem_constant() {
+    (Expression::argument("a", 32) % Expression::constant(15u64)).compile();
+}
+
+#[test]
+fn rem_argument() {
+    (Expression::argument("a", 8) % (Expression::argument("b", 3) + Expression::argument("c", 3) + Expression::constant(1u64)))
+        .compile();
+}

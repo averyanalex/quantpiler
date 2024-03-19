@@ -2,6 +2,7 @@ use std::{fmt::Display, iter, str::FromStr};
 
 use egg::*;
 use itertools::Itertools;
+use num::BigUint;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{extract::LpCostFunction, op::Op};
@@ -336,6 +337,32 @@ impl<A: Analysis<Logic>> LpCostFunction<Logic, A> for XorMinimizerCost {
     }
 }
 
+pub fn build_constant(egraph: &mut EGraph<Logic, ()>, value: BigUint) -> Vec<Id> {
+    (0..value.bits())
+        .map(|i| {
+            let bit = value.bit(i);
+            egraph.add(Logic::Const(bit))
+        })
+        .collect()
+}
+
+pub fn build_ternary(egraph: &mut EGraph<Logic, ()>, cond: Id, then: &[Id], or: &[Id]) -> Vec<Id> {
+    let inv_cond = egraph.add(Logic::Not(cond));
+
+    then.iter()
+        .zip_longest(or)
+        .map(|thenor| match thenor {
+            itertools::EitherOrBoth::Both(then, or) => {
+                let then_cond = egraph.add(Logic::And(Box::new([*then, cond])));
+                let or_inv_cond = egraph.add(Logic::And(Box::new([*or, inv_cond])));
+                egraph.add(Logic::Xor(Box::new([then_cond, or_inv_cond])))
+            }
+            itertools::EitherOrBoth::Left(then) => egraph.add(Logic::And(Box::new([*then, cond]))),
+            itertools::EitherOrBoth::Right(or) => egraph.add(Logic::And(Box::new([*or, inv_cond]))),
+        })
+        .collect()
+}
+
 /// Generates `a + b`.
 pub fn build_add(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
     let mut c = None;
@@ -372,6 +399,26 @@ pub fn build_add(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> 
     bits
 }
 
+/// Generates `a - b`.
+pub fn build_sub(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
+    let mut b_not = b
+        .iter()
+        .copied()
+        .map(|b| egraph.add(Logic::Not(b)))
+        .collect_vec();
+    let one = egraph.add(Logic::Const(true));
+    if b_not.len() < a.len() {
+        b_not.resize(a.len(), one);
+    }
+    // a - b = [a0 a1 ... aN] - [b0 b1 ... bM] = [a0 a1 ... aN] + [!b0 !b1 ... !bM] + [1]
+    let b_minus = build_add(egraph, &b_not, &[one]);
+
+    // MSB contains bit == (a >= b)
+    let mut a_sub_b = build_add(egraph, a, &b_minus[..b_not.len()]);
+    a_sub_b.truncate(a.len().max(b.len()) + 1);
+    a_sub_b
+}
+
 /// Generates `a * b`.
 pub fn build_mul(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
     b.iter()
@@ -386,6 +433,55 @@ pub fn build_mul(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> 
         .collect_vec()
         .into_iter()
         .fold(vec![], |acc, x| build_add(egraph, &acc, &x))
+}
+
+/// Generates `a % b`
+pub fn build_mod(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
+    let mut a = a.to_vec();
+    if a.len() < b.len() {
+        // => (a < b) => (a == a mod b)
+        return a;
+    }
+    let delta_size = a.len();
+    let b = iter::repeat(egraph.add(Logic::Const(false)))
+        .take(delta_size)
+        .chain(b.iter().copied())
+        .collect_vec();
+
+    for idx in 0..=delta_size {
+        assert!(idx < b.len());
+        // b[idx..] = b_initial << (a.len() - b.len() - idx)
+        let a_sub_b = build_sub(egraph, &a, &b[idx..]);
+        let (a_sub_b, a_ge_b) = a_sub_b.split_at(a.len());
+        // a_new = (a_old >= b) ? (a_old - b) : a_old
+        a = if let [.., a_ge_b] = a_ge_b[..] {
+            build_ternary(egraph, a_ge_b, a_sub_b, &a)
+        } else {
+            unreachable!()
+        };
+        // a_new < b
+        a.truncate(b.len() - idx);
+    }
+
+    a
+}
+
+pub fn build_mod_single(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
+    if a.len() < b.len() {
+        // => (a < b) => (a == a mod b)
+        return a.to_vec();
+    }
+
+    let a_sub_b = build_sub(egraph, &a, &b);
+    let (a_sub_b, a_ge_b) = a_sub_b.split_at(a.len());
+    // a_new = (a_old >= b) ? (a_old - b) : a_old
+    let mut a = if let [.., a_ge_b] = a_ge_b[..] {
+        build_ternary(egraph, a_ge_b, a_sub_b, &a)
+    } else {
+        unreachable!()
+    };
+    a.truncate(b.len());
+    a
 }
 
 /// Takes ``RecExpr<Op>`` and builds ``RecExpr<Logic>``. Generates logic gates
@@ -411,7 +507,7 @@ impl Logificator {
         let return_ids = self.get_logificated(Id::from(self.op_expr.as_ref().len() - 1));
         let return_logic = Logic::Register(return_ids.into_boxed_slice());
         let return_id = self.egraph.add(return_logic);
-        let cleaned_expr = crate::extract::extract(&self.egraph, return_id, &mut XorMinimizerCost);
+        let cleaned_expr = crate::extract::extract(&self.egraph, return_id, XorMinimizerCost);
 
         // Pass 2: heuristic optimization with fast extractor
         let mut runner = Runner::default()
@@ -437,7 +533,7 @@ impl Logificator {
                 Ok(())
             });
         runner = runner.run(&make_rules());
-        crate::extract::extract(&runner.egraph, runner.roots[0], &mut XorMinimizerCost)
+        crate::extract::extract(&runner.egraph, runner.roots[0], XorMinimizerCost)
 
         // let xors = expr
         //     .as_ref()
@@ -470,41 +566,13 @@ impl Logificator {
                     .map(|l| self.egraph.add(l))
                     .collect(),
                 Op::Ternary([cond, then, or]) => {
-                    let cond = self.get_logificated(cond)[0];
-                    let inv_cond = self.egraph.add(Logic::Not(cond));
+                    let cond = self.get_logificated(cond);
+                    let then = self.get_logificated(then);
+                    let or = self.get_logificated(or);
 
-                    self.get_logificated(then)
-                        .into_iter()
-                        .zip_longest(self.get_logificated(or))
-                        .map(|thenor| match thenor {
-                            itertools::EitherOrBoth::Both(then, or) => {
-                                let then_cond = self.egraph.add(Logic::And(Box::new([then, cond])));
-                                let or_inv_cond =
-                                    self.egraph.add(Logic::And(Box::new([or, inv_cond])));
-                                self.egraph
-                                    .add(Logic::Xor(Box::new([then_cond, or_inv_cond])))
-                            }
-                            itertools::EitherOrBoth::Left(then) => {
-                                self.egraph.add(Logic::And(Box::new([then, cond])))
-                            }
-                            itertools::EitherOrBoth::Right(or) => {
-                                self.egraph.add(Logic::And(Box::new([or, inv_cond])))
-                            }
-                        })
-                        .collect()
+                    build_ternary(&mut self.egraph, cond[0], &then, &or)
                 }
-                Op::Constant(value) => (0..64)
-                    .map(|i| ((u64::try_from(value.clone()).unwrap() >> i) & 1) == 1)
-                    .rev()
-                    .collect_vec()
-                    .into_iter()
-                    .skip_while(|x| !x)
-                    .map(Logic::Const)
-                    .map(|l| self.egraph.add(l))
-                    .collect_vec()
-                    .into_iter()
-                    .rev()
-                    .collect_vec(),
+                Op::Constant(value) => build_constant(&mut self.egraph, value),
                 Op::Not(a) => self
                     .get_logificated(a)
                     .into_iter()
@@ -571,6 +639,17 @@ impl Logificator {
                     let b = self.get_logificated(b);
                     build_mul(&mut self.egraph, &a, &b)
                 }
+                Op::Rem([a, b]) => {
+                    let a = self.get_logificated(a);
+                    let b = self.get_logificated(b);
+                    build_mod(&mut self.egraph, &a, &b)
+                }
+                // Not intended to use, since it implies signed arithmetics, that is not supported
+                // Op::Sub([a, b]) => {
+                //     let a = self.get_logificated(a);
+                //     let b = self.get_logificated(b);
+                //     build_sub(&mut self.egraph, &a, &b)
+                // }
                 _ => todo!("{op}"),
             };
 

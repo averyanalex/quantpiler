@@ -33,7 +33,7 @@ struct CostSet {
 pub fn extract<L: Language, N: Analysis<L>, C: LpCostFunction<L, N>>(
     egraph: &EGraph<L, N>,
     root: Id,
-    cost: &mut C,
+    mut cost: C,
 ) -> RecExpr<L> {
     let mut costs = FxHashMap::<Id, CostSet>::with_capacity_and_hasher(
         egraph.classes().len(),
