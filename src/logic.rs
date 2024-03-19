@@ -337,7 +337,7 @@ impl<A: Analysis<Logic>> LpCostFunction<Logic, A> for XorMinimizerCost {
     }
 }
 
-pub fn build_constant(egraph: &mut EGraph<Logic, ()>, value: BigUint) -> Vec<Id> {
+pub fn build_constant(egraph: &mut EGraph<Logic, ()>, value: &BigUint) -> Vec<Id> {
     (0..value.bits())
         .map(|i| {
             let bit = value.bit(i);
@@ -472,11 +472,11 @@ pub fn build_mod_single(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> V
         return a.to_vec();
     }
 
-    let a_sub_b = build_sub(egraph, &a, &b);
+    let a_sub_b = build_sub(egraph, a, b);
     let (a_sub_b, a_ge_b) = a_sub_b.split_at(a.len());
     // a_new = (a_old >= b) ? (a_old - b) : a_old
     let mut a = if let [.., a_ge_b] = a_ge_b[..] {
-        build_ternary(egraph, a_ge_b, a_sub_b, &a)
+        build_ternary(egraph, a_ge_b, a_sub_b, a)
     } else {
         unreachable!()
     };
@@ -572,7 +572,7 @@ impl Logificator {
 
                     build_ternary(&mut self.egraph, cond[0], &then, &or)
                 }
-                Op::Constant(value) => build_constant(&mut self.egraph, value),
+                Op::Constant(value) => build_constant(&mut self.egraph, &value),
                 Op::Not(a) => self
                     .get_logificated(a)
                     .into_iter()

@@ -131,6 +131,9 @@ fn rem_constant() {
 
 #[test]
 fn rem_argument() {
-    (Expression::argument("a", 8) % (Expression::argument("b", 3) + Expression::argument("c", 3) + Expression::constant(1u64)))
-        .compile();
+    (Expression::argument("a", 8)
+        % (Expression::argument("b", 3)
+            + Expression::argument("c", 3)
+            + Expression::constant(1u64)))
+    .compile();
 }
