@@ -410,11 +410,11 @@ pub fn build_sub(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> 
     if b_not.len() < a.len() {
         b_not.resize(a.len(), one);
     }
-    // a - b = [a0 a1 ... aN] - [b0 b1 ... bM] = [a0 a1 ... aN] + [!b0 !b1 ... !bM] + [1]
-    let b_minus = build_add(egraph, &b_not, &[one]);
+    // -b = ~b + 1 = [!b0 !b1 ... !bM 1 ... 1] + [1]
+    let mut b_minus = build_add(egraph, &b_not, &[one]);
+    b_minus.truncate(b_not.len());
 
-    // MSB contains bit == (a >= b)
-    let mut a_sub_b = build_add(egraph, a, &b_minus[..b_not.len()]);
+    let mut a_sub_b = build_add(egraph, a, &b_minus);
     a_sub_b.truncate(a.len().max(b.len()) + 1);
     a_sub_b
 }
@@ -437,21 +437,20 @@ pub fn build_mul(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> 
 
 /// Generates `a % b`
 pub fn build_mod(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
-    let mut a = a.to_vec();
-    if a.len() < b.len() {
-        // => (a < b) => (a == a mod b)
-        return a;
-    }
-    let delta_size = a.len();
+    let delta_size = a.len() - 1;
     let b = iter::repeat(egraph.add(Logic::Const(false)))
         .take(delta_size)
         .chain(b.iter().copied())
         .collect_vec();
+    let mut a = a.to_vec();
 
     for idx in 0..=delta_size {
-        assert!(idx < b.len());
-        // b[idx..] = b_initial << (a.len() - b.len() - idx)
+        debug_assert!(idx < b.len());
         let a_sub_b = build_sub(egraph, &a, &b[idx..]);
+        // |a_sub_b| = |a - b[idx..]| = max(|a|, |b[idx..]|) + 1
+        // => |a_sub_b| >= |a| + 1
+        // => |a_sub_b| > |a|
+        debug_assert!(a_sub_b.len() > a.len());
         let (a_sub_b, a_ge_b) = a_sub_b.split_at(a.len());
         // a_new = (a_old >= b) ? (a_old - b) : a_old
         a = if let [.., a_ge_b] = a_ge_b[..] {
@@ -459,7 +458,7 @@ pub fn build_mod(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> 
         } else {
             unreachable!()
         };
-        // a_new < b
+        // truncate due to a_new should fit into b.len() at the end
         a.truncate(b.len() - idx);
     }
 
@@ -467,11 +466,6 @@ pub fn build_mod(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> 
 }
 
 pub fn build_mod_single(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
-    if a.len() < b.len() {
-        // => (a < b) => (a == a mod b)
-        return a.to_vec();
-    }
-
     let a_sub_b = build_sub(egraph, a, b);
     let (a_sub_b, a_ge_b) = a_sub_b.split_at(a.len());
     // a_new = (a_old >= b) ? (a_old - b) : a_old
