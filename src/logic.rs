@@ -1,7 +1,7 @@
 use std::{fmt::Display, iter, str::FromStr};
 
 use egg::*;
-use itertools::Itertools;
+use itertools::{EitherOrBoth, Itertools};
 use num::BigUint;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -352,13 +352,13 @@ pub fn build_ternary(egraph: &mut EGraph<Logic, ()>, cond: Id, then: &[Id], or: 
     then.iter()
         .zip_longest(or)
         .map(|thenor| match thenor {
-            itertools::EitherOrBoth::Both(then, or) => {
+            EitherOrBoth::Both(then, or) => {
                 let then_cond = egraph.add(Logic::And(Box::new([*then, cond])));
                 let or_inv_cond = egraph.add(Logic::And(Box::new([*or, inv_cond])));
                 egraph.add(Logic::Xor(Box::new([then_cond, or_inv_cond])))
             }
-            itertools::EitherOrBoth::Left(then) => egraph.add(Logic::And(Box::new([*then, cond]))),
-            itertools::EitherOrBoth::Right(or) => egraph.add(Logic::And(Box::new([*or, inv_cond]))),
+            EitherOrBoth::Left(then) => egraph.add(Logic::And(Box::new([*then, cond]))),
+            EitherOrBoth::Right(or) => egraph.add(Logic::And(Box::new([*or, inv_cond]))),
         })
         .collect()
 }
@@ -370,29 +370,30 @@ pub fn build_add(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> 
     let mut bits = a
         .iter()
         .zip_longest(b.iter())
-        .map(|ab| match ab {
-            itertools::EitherOrBoth::Both(a, b) => {
-                let a_xor_b = egraph.add(Logic::Xor(Box::new([*a, *b])));
-                let a_and_b = egraph.add(Logic::And(Box::new([*a, *b])));
-                if let Some(cin) = c {
-                    let cin_and_axorb = egraph.add(Logic::And(Box::new([cin, a_xor_b])));
-                    c = Some(egraph.add(Logic::Xor(Box::new([a_and_b, cin_and_axorb]))));
-                    egraph.add(Logic::Xor(Box::new([a_xor_b, cin])))
-                } else {
-                    c = Some(a_and_b);
-                    a_xor_b
+        .map(|ab| {
+            match ab {
+                // a + b + cin = [s, cout]
+                EitherOrBoth::Both(&a, &b) => {
+                    let a_xor_b = egraph.add(Logic::Xor(Box::new([a, b])));
+                    let a_and_b = egraph.add(Logic::And(Box::new([a, b])));
+                    if let Some(cin) = c {
+                        let cin_and_axorb = egraph.add(Logic::And(Box::new([cin, a_xor_b])));
+                        c = Some(egraph.add(Logic::Xor(Box::new([a_and_b, cin_and_axorb]))));
+                        egraph.add(Logic::Xor(Box::new([a_xor_b, cin])))
+                    } else {
+                        c = Some(a_and_b);
+                        a_xor_b
+                    }
                 }
+                // a + cin = [s, cout]
+                EitherOrBoth::Left(&a) | EitherOrBoth::Right(&a) => c.map_or(a, |cin| {
+                    c = Some(egraph.add(Logic::And(Box::new([cin, a]))));
+                    egraph.add(Logic::Xor(Box::new([cin, a])))
+                }),
             }
-            itertools::EitherOrBoth::Left(a) => c.map_or(*a, |cin| {
-                c = Some(egraph.add(Logic::And(Box::new([cin, *a]))));
-                egraph.add(Logic::Xor(Box::new([cin, *a])))
-            }),
-            itertools::EitherOrBoth::Right(b) => c.map_or(*b, |cin| {
-                c = Some(egraph.add(Logic::And(Box::new([cin, *b]))));
-                egraph.add(Logic::Xor(Box::new([cin, *b])))
-            }),
         })
         .collect_vec();
+
     if let Some(c) = c {
         bits.push(c);
     }
@@ -401,22 +402,56 @@ pub fn build_add(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> 
 
 /// Generates `a - b`.
 pub fn build_sub(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
-    let mut b_not = b
-        .iter()
-        .copied()
-        .map(|b| egraph.add(Logic::Not(b)))
-        .collect_vec();
-    let one = egraph.add(Logic::Const(true));
-    if b_not.len() < a.len() {
-        b_not.resize(a.len(), one);
-    }
-    // -b = ~b + 1 = [!b0 !b1 ... !bM 1 ... 1] + [1]
-    let mut b_minus = build_add(egraph, &b_not, &[one]);
-    b_minus.truncate(b_not.len());
+    let mut c = None;
 
-    let mut a_sub_b = build_add(egraph, a, &b_minus);
-    a_sub_b.truncate(a.len().max(b.len()) + 1);
-    a_sub_b
+    let mut bits = a
+        .iter()
+        .zip_longest(b.iter())
+        .map(|ab| match ab {
+            // a + !b + cin = [s, cout]
+            EitherOrBoth::Both(&a, &b) => {
+                let b = egraph.add(Logic::Not(b));
+                let a_xor_b = egraph.add(Logic::Xor(Box::new([a, b])));
+                let a_and_b = egraph.add(Logic::And(Box::new([a, b])));
+                if let Some(cin) = c {
+                    let cin_and_axorb = egraph.add(Logic::And(Box::new([cin, a_xor_b])));
+                    c = Some(egraph.add(Logic::Xor(Box::new([a_and_b, cin_and_axorb]))));
+                    egraph.add(Logic::Xor(Box::new([a_xor_b, cin])))
+                } else {
+                    // c = a || b = !(!a && !b)
+                    let b = egraph.add(Logic::Not(b));
+                    let a = egraph.add(Logic::Not(a));
+                    let not_a_or_b = egraph.add(Logic::And(Box::new([a, b])));
+                    c = Some(egraph.add(Logic::Not(not_a_or_b)));
+                    egraph.add(Logic::Not(a_xor_b))
+                }
+            }
+            // a + 1 + cin = [s, cout]
+            EitherOrBoth::Left(&a) => c.map_or(a, |cin| {
+                let a_not = egraph.add(Logic::Not(a));
+                let c_not = egraph.add(Logic::Not(cin));
+                let not_a_or_c = egraph.add(Logic::And(Box::new([a_not, c_not])));
+                c = Some(egraph.add(Logic::Not(not_a_or_c)));
+                egraph.add(Logic::Xor(Box::new([a_not, cin])))
+            }),
+            // 0 + !b + cin = [s, cout]
+            EitherOrBoth::Right(&b) => {
+                let b_not = egraph.add(Logic::Not(b));
+                if let Some(cin) = c {
+                    c = Some(egraph.add(Logic::And(Box::new([b_not, cin]))));
+                    egraph.add(Logic::Xor(Box::new([b_not, cin])))
+                } else {
+                    c = Some(b_not);
+                    b
+                }
+            }
+        })
+        .collect_vec();
+
+    if let Some(c) = c {
+        bits.push(c);
+    }
+    bits
 }
 
 /// Generates `a * b`.
@@ -578,10 +613,8 @@ impl Logificator {
                     .into_iter()
                     .zip_longest(self.get_logificated(b))
                     .map(|ab| match ab {
-                        itertools::EitherOrBoth::Both(a, b) => {
-                            self.egraph.add(Logic::Xor(Box::new([a, b])))
-                        }
-                        itertools::EitherOrBoth::Left(a) | itertools::EitherOrBoth::Right(a) => a,
+                        EitherOrBoth::Both(a, b) => self.egraph.add(Logic::Xor(Box::new([a, b]))),
+                        EitherOrBoth::Left(a) | EitherOrBoth::Right(a) => a,
                     })
                     .collect(),
                 Op::Or([a, b]) => self
@@ -589,13 +622,13 @@ impl Logificator {
                     .into_iter()
                     .zip_longest(self.get_logificated(b))
                     .map(|ab| match ab {
-                        itertools::EitherOrBoth::Both(a, b) => {
+                        EitherOrBoth::Both(a, b) => {
                             let not_a = self.egraph.add(Logic::Not(a));
                             let not_b = self.egraph.add(Logic::Not(b));
                             let not_a_not_b = self.egraph.add(Logic::And(Box::new([not_a, not_b])));
                             self.egraph.add(Logic::Not(not_a_not_b))
                         }
-                        itertools::EitherOrBoth::Left(a) | itertools::EitherOrBoth::Right(a) => a,
+                        EitherOrBoth::Left(a) | EitherOrBoth::Right(a) => a,
                     })
                     .collect(),
                 Op::And([a, b]) => self

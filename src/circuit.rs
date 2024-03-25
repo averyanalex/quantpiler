@@ -124,14 +124,8 @@ impl Circuit {
     pub fn add_qubit_description(&mut self, qubit: Qubit, description: QubitDesc) {
         self.qubits_map
             .entry(qubit)
-            .and_modify(|set| {
-                set.insert(description.clone());
-            })
-            .or_insert_with(|| {
-                let mut set = FxHashSet::default();
-                set.insert(description);
-                set
-            });
+            .or_default()
+            .insert(description);
     }
 
     pub fn get_ancilla_qubit(&mut self) -> Qubit {

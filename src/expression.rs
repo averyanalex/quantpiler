@@ -64,13 +64,12 @@ impl Expression {
     }
 
     /// Compile expression into quantum circuit
-    #[cfg(test)]
     pub fn compile(self) -> crate::circuit::Circuit {
         let op = self.build();
-        let logic = crate::logic::Logificator::new(op.clone()).build_logic();
+        #[allow(clippy::let_and_return)]
         let circuit = crate::compiler::Compiler::new(&logic).compile();
 
-        // println!("Qubits: {}", circuit.qubits_count);
+        #[cfg(test)]
         crate::verify::verify(&op, &logic, &circuit);
 
         circuit
