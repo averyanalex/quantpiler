@@ -60,8 +60,36 @@ pub fn execute_op(op: &RecExpr<Op>, args: &FxHashMap<String, BigUint>) -> BigUin
                     BigUint::zero()
                 }
             }
+            Op::Lt([a, b]) => {
+                if done[a] < done[b] {
+                    BigUint::one()
+                } else {
+                    BigUint::zero()
+                }
+            }
+            Op::Gt([a, b]) => {
+                if done[a] > done[b] {
+                    BigUint::one()
+                } else {
+                    BigUint::zero()
+                }
+            }
             Op::Ne([a, b]) => {
                 if done[a] != done[b] {
+                    BigUint::one()
+                } else {
+                    BigUint::zero()
+                }
+            }
+            Op::Ge([a, b]) => {
+                if done[a] >= done[b] {
+                    BigUint::one()
+                } else {
+                    BigUint::zero()
+                }
+            }
+            Op::Le([a, b]) => {
+                if done[a] <= done[b] {
                     BigUint::one()
                 } else {
                     BigUint::zero()

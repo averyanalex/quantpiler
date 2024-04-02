@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use egg::*;
 use num::BigUint;
 #[cfg(feature = "python")]
-use pyo3::prelude::*;
+use pyo3::{prelude::*, pyclass::CompareOp};
 
 #[cfg(feature = "python")]
 use crate::circuit::Circuit;
@@ -75,6 +75,60 @@ impl Expression {
         crate::verify::verify(&op, &logic, &circuit);
 
         circuit
+    }
+
+    pub fn eq(&self, other: &Self) -> Self {
+        Self(
+            OP_EGRAPH
+                .lock()
+                .unwrap()
+                .add(Op::Eq([self.id(), other.id()])),
+        )
+    }
+
+    pub fn gt(&self, other: &Self) -> Self {
+        Self(
+            OP_EGRAPH
+                .lock()
+                .unwrap()
+                .add(Op::Gt([self.id(), other.id()])),
+        )
+    }
+
+    pub fn lt(&self, other: &Self) -> Self {
+        Self(
+            OP_EGRAPH
+                .lock()
+                .unwrap()
+                .add(Op::Lt([self.id(), other.id()])),
+        )
+    }
+
+    pub fn ne(&self, other: &Self) -> Self {
+        Self(
+            OP_EGRAPH
+                .lock()
+                .unwrap()
+                .add(Op::Ne([self.id(), other.id()])),
+        )
+    }
+
+    pub fn le(&self, other: &Self) -> Self {
+        Self(
+            OP_EGRAPH
+                .lock()
+                .unwrap()
+                .add(Op::Le([self.id(), other.id()])),
+        )
+    }
+
+    pub fn ge(&self, other: &Self) -> Self {
+        Self(
+            OP_EGRAPH
+                .lock()
+                .unwrap()
+                .add(Op::Ge([self.id(), other.id()])),
+        )
     }
 }
 
@@ -316,5 +370,16 @@ impl Expr {
 
     fn __imod__(&mut self, rhs: RhsTypes) {
         *self = self.__mod__(rhs);
+    }
+
+    fn __richcmp__(&self, other: RhsTypes, op: CompareOp) -> Self {
+        match op {
+            CompareOp::Lt => Self(self.0.lt(&other.expr())),
+            CompareOp::Le => Self(self.0.le(&other.expr())),
+            CompareOp::Eq => Self(self.0.eq(&other.expr())),
+            CompareOp::Ne => Self(self.0.ne(&other.expr())),
+            CompareOp::Gt => Self(self.0.gt(&other.expr())),
+            CompareOp::Ge => Self(self.0.ge(&other.expr())),
+        }
     }
 }

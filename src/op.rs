@@ -40,7 +40,11 @@ define_language! {
         "//" = Div([Id; 2]),
         "%" = Rem([Id; 2]),
         "==" = Eq([Id; 2]),
+        "<" = Lt([Id; 2]),
+        ">" = Gt([Id; 2]),
         "!=" = Ne([Id; 2]),
+        ">=" = Ge([Id; 2]),
+        "<=" = Le([Id; 2]),
         "?" = Ternary([Id; 3]),
         Constant(BigUint),
         Argument(ArgumentInfo),
@@ -103,11 +107,39 @@ impl Analysis<Op> for Analyzer {
                     BigUint::zero()
                 }
             }),
+            Op::Lt([a, b]) => Some({
+                if x(a)? < x(b)? {
+                    BigUint::one()
+                } else {
+                    BigUint::zero()
+                }
+            }),
+            Op::Gt([a, b]) => Some({
+                if x(a)? > x(b)? {
+                    BigUint::one()
+                } else {
+                    BigUint::zero()
+                }
+            }),
             Op::Ne([a, b]) => Some({
                 if x(a)? == x(b)? {
                     BigUint::zero()
                 } else {
                     BigUint::one()
+                }
+            }),
+            Op::Ge([a, b]) => Some({
+                if x(a)? >= x(b)? {
+                    BigUint::one()
+                } else {
+                    BigUint::zero()
+                }
+            }),
+            Op::Le([a, b]) => Some({
+                if x(a)? <= x(b)? {
+                    BigUint::one()
+                } else {
+                    BigUint::zero()
                 }
             }),
             Op::Ternary([cond, then, or]) => Some({
@@ -224,7 +256,7 @@ impl LpCostFunction<Op, Analyzer> for Cost {
             Op::And(_) => 6.0 * l,
             Op::Shr(_) => 0.2 * l,
             Op::Shl(_) => 0.4 * l,
-            Op::Add(_) | Op::Sub(_) => 32.0 * l,
+            Op::Add(_) | Op::Sub(_) | Op::Gt(_) | Op::Lt(_) | Op::Le(_) | Op::Ge(_) => 32.0 * l,
             Op::Eq(_) | Op::Ne(_) => 4.0 * l,
             Op::Mul(_) => 128.0 * l,
             Op::Div(_) => 128.0 * l,

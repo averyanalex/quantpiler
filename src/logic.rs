@@ -498,7 +498,7 @@ impl Logificator {
     }
 
     /// Generates `a - b`.
-    pub fn sub(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
+    fn sub(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
         let mut c = None;
 
         let mut bits = a
@@ -735,10 +735,10 @@ impl Logificator {
                 self.add(&a, &b)
             }
             Op::Sub([a, b]) => {
-                let _a = self.get_logic(a);
-                let _b = self.get_logic(b);
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
 
-                unimplemented!("{op}")
+                unimplemented!("{op} {a:?} {b:?}")
             }
             Op::Mul([a, b]) => {
                 let a = self.get_logic(a);
@@ -765,12 +765,42 @@ impl Logificator {
                 let xor = self.xor(&a, &b);
                 vec![self.eq_zero(&xor)]
             }
+            // == ! Ge
+            Op::Lt([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                let sub = self.sub(&a, &b);
+                vec![self.egraph.add(Logic::Not(sub[a.len()]))]
+            }
+            // == ! Le
+            Op::Gt([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                let sub = self.sub(&b, &a);
+                vec![self.egraph.add(Logic::Not(sub[a.len()]))]
+            }
             Op::Ne([a, b]) => {
                 let a = self.get_logic(a);
                 let b = self.get_logic(b);
 
                 let xor = self.xor(&a, &b);
                 vec![self.ne_zero(&xor)]
+            }
+            Op::Ge([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                let sub = self.sub(&a, &b);
+                vec![sub[a.len()]]
+            }
+            Op::Le([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                let sub = self.sub(&b, &a);
+                vec![sub[a.len()]]
             }
             Op::Ternary([cond, then, or]) => {
                 let cond = self.get_logic(cond);

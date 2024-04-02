@@ -6,3 +6,5 @@ target
 __pycache__
 *.so
 dist
+.DS_Store
+.vscode
