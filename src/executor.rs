@@ -60,6 +60,13 @@ pub fn execute_op(op: &RecExpr<Op>, args: &FxHashMap<String, BigUint>) -> BigUin
                     BigUint::zero()
                 }
             }
+            Op::Ne([a, b]) => {
+                if done[a] != done[b] {
+                    BigUint::one()
+                } else {
+                    BigUint::zero()
+                }
+            }
             Op::Ternary([cond, then, or]) => {
                 if done[cond].is_one() {
                     done[then].clone()

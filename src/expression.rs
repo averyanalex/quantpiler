@@ -66,6 +66,8 @@ impl Expression {
     /// Compile expression into quantum circuit
     pub fn compile(self) -> crate::circuit::Circuit {
         let op = self.build();
+        #[allow(clippy::redundant_clone)]
+        let logic = crate::logic::Logificator::new(op.clone()).build_logic();
         #[allow(clippy::let_and_return)]
         let circuit = crate::compiler::Compiler::new(&logic).compile();
 

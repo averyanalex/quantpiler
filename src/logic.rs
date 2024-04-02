@@ -5,7 +5,10 @@ use itertools::{EitherOrBoth, Itertools};
 use num::BigUint;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{extract::LpCostFunction, op::Op};
+use crate::{
+    extract::LpCostFunction,
+    op::{ArgumentInfo, Op},
+};
 
 define_language! {
     /// Logic language
@@ -337,182 +340,6 @@ impl<A: Analysis<Logic>> LpCostFunction<Logic, A> for XorMinimizerCost {
     }
 }
 
-pub fn build_constant(egraph: &mut EGraph<Logic, ()>, value: &BigUint) -> Vec<Id> {
-    (0..value.bits())
-        .map(|i| {
-            let bit = value.bit(i);
-            egraph.add(Logic::Const(bit))
-        })
-        .collect()
-}
-
-pub fn build_ternary(egraph: &mut EGraph<Logic, ()>, cond: Id, then: &[Id], or: &[Id]) -> Vec<Id> {
-    let inv_cond = egraph.add(Logic::Not(cond));
-
-    then.iter()
-        .zip_longest(or)
-        .map(|thenor| match thenor {
-            EitherOrBoth::Both(then, or) => {
-                let then_cond = egraph.add(Logic::And(Box::new([*then, cond])));
-                let or_inv_cond = egraph.add(Logic::And(Box::new([*or, inv_cond])));
-                egraph.add(Logic::Xor(Box::new([then_cond, or_inv_cond])))
-            }
-            EitherOrBoth::Left(then) => egraph.add(Logic::And(Box::new([*then, cond]))),
-            EitherOrBoth::Right(or) => egraph.add(Logic::And(Box::new([*or, inv_cond]))),
-        })
-        .collect()
-}
-
-/// Generates `a + b`.
-pub fn build_add(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
-    let mut c = None;
-
-    let mut bits = a
-        .iter()
-        .zip_longest(b.iter())
-        .map(|ab| {
-            match ab {
-                // a + b + cin = [s, cout]
-                EitherOrBoth::Both(&a, &b) => {
-                    let a_xor_b = egraph.add(Logic::Xor(Box::new([a, b])));
-                    let a_and_b = egraph.add(Logic::And(Box::new([a, b])));
-                    if let Some(cin) = c {
-                        let cin_and_axorb = egraph.add(Logic::And(Box::new([cin, a_xor_b])));
-                        c = Some(egraph.add(Logic::Xor(Box::new([a_and_b, cin_and_axorb]))));
-                        egraph.add(Logic::Xor(Box::new([a_xor_b, cin])))
-                    } else {
-                        c = Some(a_and_b);
-                        a_xor_b
-                    }
-                }
-                // a + cin = [s, cout]
-                EitherOrBoth::Left(&a) | EitherOrBoth::Right(&a) => c.map_or(a, |cin| {
-                    c = Some(egraph.add(Logic::And(Box::new([cin, a]))));
-                    egraph.add(Logic::Xor(Box::new([cin, a])))
-                }),
-            }
-        })
-        .collect_vec();
-
-    if let Some(c) = c {
-        bits.push(c);
-    }
-    bits
-}
-
-/// Generates `a - b`.
-pub fn build_sub(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
-    let mut c = None;
-
-    let mut bits = a
-        .iter()
-        .zip_longest(b.iter())
-        .map(|ab| match ab {
-            // a + !b + cin = [s, cout]
-            EitherOrBoth::Both(&a, &b) => {
-                let b = egraph.add(Logic::Not(b));
-                let a_xor_b = egraph.add(Logic::Xor(Box::new([a, b])));
-                let a_and_b = egraph.add(Logic::And(Box::new([a, b])));
-                if let Some(cin) = c {
-                    let cin_and_axorb = egraph.add(Logic::And(Box::new([cin, a_xor_b])));
-                    c = Some(egraph.add(Logic::Xor(Box::new([a_and_b, cin_and_axorb]))));
-                    egraph.add(Logic::Xor(Box::new([a_xor_b, cin])))
-                } else {
-                    // c = a || b = !(!a && !b)
-                    let b = egraph.add(Logic::Not(b));
-                    let a = egraph.add(Logic::Not(a));
-                    let not_a_or_b = egraph.add(Logic::And(Box::new([a, b])));
-                    c = Some(egraph.add(Logic::Not(not_a_or_b)));
-                    egraph.add(Logic::Not(a_xor_b))
-                }
-            }
-            // a + 1 + cin = [s, cout]
-            EitherOrBoth::Left(&a) => c.map_or(a, |cin| {
-                let a_not = egraph.add(Logic::Not(a));
-                let c_not = egraph.add(Logic::Not(cin));
-                let not_a_or_c = egraph.add(Logic::And(Box::new([a_not, c_not])));
-                c = Some(egraph.add(Logic::Not(not_a_or_c)));
-                egraph.add(Logic::Xor(Box::new([a_not, cin])))
-            }),
-            // 0 + !b + cin = [s, cout]
-            EitherOrBoth::Right(&b) => {
-                let b_not = egraph.add(Logic::Not(b));
-                if let Some(cin) = c {
-                    c = Some(egraph.add(Logic::And(Box::new([b_not, cin]))));
-                    egraph.add(Logic::Xor(Box::new([b_not, cin])))
-                } else {
-                    c = Some(b_not);
-                    b
-                }
-            }
-        })
-        .collect_vec();
-
-    if let Some(c) = c {
-        bits.push(c);
-    }
-    bits
-}
-
-/// Generates `a * b`.
-pub fn build_mul(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
-    b.iter()
-        .enumerate()
-        .map(|(idx, b_bit)| {
-            iter::repeat(Logic::Const(false))
-                .take(idx)
-                .chain(a.iter().map(|a_bit| Logic::And(Box::new([*a_bit, *b_bit]))))
-                .map(|l| egraph.add(l))
-                .collect_vec()
-        })
-        .collect_vec()
-        .into_iter()
-        .fold(vec![], |acc, x| build_add(egraph, &acc, &x))
-}
-
-/// Generates `a % b`
-pub fn build_mod(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
-    let delta_size = a.len() - 1;
-    let b = iter::repeat(egraph.add(Logic::Const(false)))
-        .take(delta_size)
-        .chain(b.iter().copied())
-        .collect_vec();
-    let mut a = a.to_vec();
-
-    for idx in 0..=delta_size {
-        debug_assert!(idx < b.len());
-        let a_sub_b = build_sub(egraph, &a, &b[idx..]);
-        // |a_sub_b| = |a - b[idx..]| = max(|a|, |b[idx..]|) + 1
-        // => |a_sub_b| >= |a| + 1
-        // => |a_sub_b| > |a|
-        debug_assert!(a_sub_b.len() > a.len());
-        let (a_sub_b, a_ge_b) = a_sub_b.split_at(a.len());
-        // a_new = (a_old >= b) ? (a_old - b) : a_old
-        a = if let [.., a_ge_b] = a_ge_b[..] {
-            build_ternary(egraph, a_ge_b, a_sub_b, &a)
-        } else {
-            unreachable!()
-        };
-        // truncate due to a_new should fit into b.len() at the end
-        a.truncate(b.len() - idx);
-    }
-
-    a
-}
-
-pub fn build_mod_single(egraph: &mut EGraph<Logic, ()>, a: &[Id], b: &[Id]) -> Vec<Id> {
-    let a_sub_b = build_sub(egraph, a, b);
-    let (a_sub_b, a_ge_b) = a_sub_b.split_at(a.len());
-    // a_new = (a_old >= b) ? (a_old - b) : a_old
-    let mut a = if let [.., a_ge_b] = a_ge_b[..] {
-        build_ternary(egraph, a_ge_b, a_sub_b, a)
-    } else {
-        unreachable!()
-    };
-    a.truncate(b.len());
-    a
-}
-
 /// Takes ``RecExpr<Op>`` and builds ``RecExpr<Logic>``. Generates logic gates
 /// expression for each bit of root [Op].
 pub struct Logificator {
@@ -533,7 +360,7 @@ impl Logificator {
 
     pub fn build_logic(mut self) -> RecExpr<Logic> {
         // Pass 1: dead nodes cleanup
-        let return_ids = self.get_logificated(Id::from(self.op_expr.as_ref().len() - 1));
+        let return_ids = self.get_logic(Id::from(self.op_expr.as_ref().len() - 1));
         let return_logic = Logic::Register(return_ids.into_boxed_slice());
         let return_id = self.egraph.add(return_logic);
         let cleaned_expr = crate::extract::extract(&self.egraph, return_id, XorMinimizerCost);
@@ -579,109 +406,385 @@ impl Logificator {
         // expr
     }
 
-    pub fn get_logificated(&mut self, id: Id) -> Vec<Id> {
-        if let Some(bits) = self.op_cache.get(&id) {
-            bits.clone()
-        } else {
-            let op = self.op_expr[id].clone();
-            let ids: Vec<_> = match op {
-                Op::Argument(argument) => (0..(argument.size))
-                    .map(|index| {
-                        Logic::Arg(ArgInfo {
-                            name: argument.name.clone(),
-                            index,
-                        })
-                    })
-                    .map(|l| self.egraph.add(l))
-                    .collect(),
-                Op::Ternary([cond, then, or]) => {
-                    let cond = self.get_logificated(cond);
-                    let then = self.get_logificated(then);
-                    let or = self.get_logificated(or);
+    fn not(&mut self, a: &[Id]) -> Vec<Id> {
+        a.iter().map(|&l| self.egraph.add(Logic::Not(l))).collect()
+    }
 
-                    build_ternary(&mut self.egraph, cond[0], &then, &or)
+    fn xor(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
+        a.iter()
+            .zip_longest(b)
+            .map(|ab| match ab {
+                EitherOrBoth::Both(&a, &b) => self.egraph.add(Logic::Xor(Box::new([a, b]))),
+                EitherOrBoth::Left(&a) | EitherOrBoth::Right(&a) => a,
+            })
+            .collect()
+    }
+
+    fn or(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
+        a.iter()
+            .zip_longest(b)
+            .map(|ab| match ab {
+                EitherOrBoth::Both(&a, &b) => {
+                    let not_a = self.egraph.add(Logic::Not(a));
+                    let not_b = self.egraph.add(Logic::Not(b));
+                    let not_a_not_b = self.egraph.add(Logic::And(Box::new([not_a, not_b])));
+                    self.egraph.add(Logic::Not(not_a_not_b))
                 }
-                Op::Constant(value) => build_constant(&mut self.egraph, &value),
-                Op::Not(a) => self
-                    .get_logificated(a)
-                    .into_iter()
-                    .map(Logic::Not)
-                    .map(|l| self.egraph.add(l))
-                    .collect(),
-                Op::Xor([a, b]) => self
-                    .get_logificated(a)
-                    .into_iter()
-                    .zip_longest(self.get_logificated(b))
-                    .map(|ab| match ab {
-                        EitherOrBoth::Both(a, b) => self.egraph.add(Logic::Xor(Box::new([a, b]))),
-                        EitherOrBoth::Left(a) | EitherOrBoth::Right(a) => a,
-                    })
-                    .collect(),
-                Op::Or([a, b]) => self
-                    .get_logificated(a)
-                    .into_iter()
-                    .zip_longest(self.get_logificated(b))
-                    .map(|ab| match ab {
-                        EitherOrBoth::Both(a, b) => {
-                            let not_a = self.egraph.add(Logic::Not(a));
-                            let not_b = self.egraph.add(Logic::Not(b));
-                            let not_a_not_b = self.egraph.add(Logic::And(Box::new([not_a, not_b])));
-                            self.egraph.add(Logic::Not(not_a_not_b))
+                EitherOrBoth::Left(&a) | EitherOrBoth::Right(&a) => a,
+            })
+            .collect()
+    }
+
+    fn and(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
+        a.iter()
+            .zip(b)
+            .map(|(&a, &b)| self.egraph.add(Logic::And(Box::new([a, b]))))
+            .collect()
+    }
+
+    #[inline]
+    #[allow(clippy::unused_self)]
+    fn shr(&self, a: &[Id], b: usize) -> Vec<Id> {
+        a[b..].to_vec()
+    }
+
+    #[inline]
+    fn shl(&mut self, a: &[Id], b: usize) -> Vec<Id> {
+        iter::repeat(self.egraph.add(Logic::Const(false)))
+            .take(b)
+            .chain(a.iter().copied())
+            .collect()
+    }
+
+    /// Generates `a + b`.
+    fn add(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
+        let mut c = None;
+
+        let mut bits = a
+            .iter()
+            .zip_longest(b)
+            .map(|ab| {
+                match ab {
+                    // a + b + cin = [s, cout]
+                    EitherOrBoth::Both(&a, &b) => {
+                        let a_xor_b = self.egraph.add(Logic::Xor(Box::new([a, b])));
+                        let a_and_b = self.egraph.add(Logic::And(Box::new([a, b])));
+                        if let Some(cin) = c {
+                            let cin_and_axorb =
+                                self.egraph.add(Logic::And(Box::new([cin, a_xor_b])));
+                            c = Some(
+                                self.egraph
+                                    .add(Logic::Xor(Box::new([a_and_b, cin_and_axorb]))),
+                            );
+                            self.egraph.add(Logic::Xor(Box::new([a_xor_b, cin])))
+                        } else {
+                            c = Some(a_and_b);
+                            a_xor_b
                         }
-                        EitherOrBoth::Left(a) | EitherOrBoth::Right(a) => a,
-                    })
-                    .collect(),
-                Op::And([a, b]) => self
-                    .get_logificated(a)
-                    .into_iter()
-                    .zip(self.get_logificated(b))
-                    .map(|(a, b)| Logic::And(Box::new([a, b])))
-                    .map(|l| self.egraph.add(l))
-                    .collect(),
-                Op::Shr([target, distance]) => {
-                    let Op::Constant(distance) = self.op_expr[distance].clone() else {
-                        todo!()
-                    };
-                    self.get_logificated(target)
-                        .into_iter()
-                        .skip(distance.try_into().unwrap())
-                        .collect()
+                    }
+                    // a + cin = [s, cout]
+                    EitherOrBoth::Left(&a) | EitherOrBoth::Right(&a) => c.map_or(a, |cin| {
+                        c = Some(self.egraph.add(Logic::And(Box::new([cin, a]))));
+                        self.egraph.add(Logic::Xor(Box::new([cin, a])))
+                    }),
                 }
-                Op::Shl([target, distance]) => {
-                    let Op::Constant(distance) = self.op_expr[distance].clone() else {
-                        todo!()
-                    };
-                    iter::repeat(self.egraph.add(Logic::Const(false)))
-                        .take(distance.try_into().unwrap())
-                        .chain(self.get_logificated(target))
-                        .collect()
-                }
-                Op::Add([a, b]) => {
-                    let a = self.get_logificated(a);
-                    let b = self.get_logificated(b);
-                    build_add(&mut self.egraph, &a, &b)
-                }
-                Op::Mul([a, b]) => {
-                    let a = self.get_logificated(a);
-                    let b = self.get_logificated(b);
-                    build_mul(&mut self.egraph, &a, &b)
-                }
-                Op::Rem([a, b]) => {
-                    let a = self.get_logificated(a);
-                    let b = self.get_logificated(b);
-                    build_mod(&mut self.egraph, &a, &b)
-                }
-                // Not intended to use, since it implies signed arithmetics, that is not supported
-                // Op::Sub([a, b]) => {
-                //     let a = self.get_logificated(a);
-                //     let b = self.get_logificated(b);
-                //     build_sub(&mut self.egraph, &a, &b)
-                // }
-                _ => todo!("{op}"),
-            };
+            })
+            .collect_vec();
 
-            self.op_cache.insert(id, ids.clone());
-            ids
+        if let Some(c) = c {
+            bits.push(c);
         }
+        bits
+    }
+
+    /// Generates `a - b`.
+    pub fn sub(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
+        let mut c = None;
+
+        let mut bits = a
+            .iter()
+            .zip_longest(b)
+            .map(|ab| match ab {
+                // a + !b + cin = [s, cout]
+                EitherOrBoth::Both(&a, &b) => {
+                    let b = self.egraph.add(Logic::Not(b));
+                    let a_xor_b = self.egraph.add(Logic::Xor(Box::new([a, b])));
+                    let a_and_b = self.egraph.add(Logic::And(Box::new([a, b])));
+                    if let Some(cin) = c {
+                        let cin_and_axorb = self.egraph.add(Logic::And(Box::new([cin, a_xor_b])));
+                        c = Some(
+                            self.egraph
+                                .add(Logic::Xor(Box::new([a_and_b, cin_and_axorb]))),
+                        );
+                        self.egraph.add(Logic::Xor(Box::new([a_xor_b, cin])))
+                    } else {
+                        // c = a || b = !(!a && !b)
+                        let b = self.egraph.add(Logic::Not(b));
+                        let a = self.egraph.add(Logic::Not(a));
+                        let not_a_or_b = self.egraph.add(Logic::And(Box::new([a, b])));
+                        c = Some(self.egraph.add(Logic::Not(not_a_or_b)));
+                        self.egraph.add(Logic::Not(a_xor_b))
+                    }
+                }
+                // a + 1 + cin = [s, cout]
+                EitherOrBoth::Left(&a) => c.map_or(a, |cin| {
+                    let a_not = self.egraph.add(Logic::Not(a));
+                    let c_not = self.egraph.add(Logic::Not(cin));
+                    let not_a_or_c = self.egraph.add(Logic::And(Box::new([a_not, c_not])));
+                    c = Some(self.egraph.add(Logic::Not(not_a_or_c)));
+                    self.egraph.add(Logic::Xor(Box::new([a_not, cin])))
+                }),
+                // 0 + !b + cin = [s, cout]
+                EitherOrBoth::Right(&b) => {
+                    let b_not = self.egraph.add(Logic::Not(b));
+                    if let Some(cin) = c {
+                        c = Some(self.egraph.add(Logic::And(Box::new([b_not, cin]))));
+                        self.egraph.add(Logic::Xor(Box::new([b_not, cin])))
+                    } else {
+                        c = Some(b_not);
+                        b
+                    }
+                }
+            })
+            .collect_vec();
+
+        if let Some(c) = c {
+            bits.push(c);
+        }
+        bits
+    }
+
+    /// Generates `a * b`.
+    fn mul(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
+        b.iter()
+            .enumerate()
+            .map(|(idx, &b_bit)| {
+                iter::repeat(Logic::Const(false))
+                    .take(idx)
+                    .chain(a.iter().map(|&a_bit| Logic::And(Box::new([a_bit, b_bit]))))
+                    .map(|l| self.egraph.add(l))
+                    .collect_vec()
+            })
+            .collect_vec()
+            .into_iter()
+            .fold(vec![], |acc, x| self.add(&acc, &x))
+    }
+
+    /// Generates `a % b`
+    fn rem(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
+        let delta_size = a.len() - 1;
+        let b = iter::repeat(self.egraph.add(Logic::Const(false)))
+            .take(delta_size)
+            .chain(b.iter().copied())
+            .collect_vec();
+        let mut a = a.to_vec();
+
+        for idx in 0..=delta_size {
+            debug_assert!(idx < b.len());
+            let a_sub_b = self.sub(&a, &b[idx..]);
+            // |a_sub_b| = |a - b[idx..]| = max(|a|, |b[idx..]|) + 1
+            // => |a_sub_b| >= |a| + 1
+            // => |a_sub_b| > |a|
+            debug_assert!(a_sub_b.len() > a.len());
+            let (a_sub_b, a_ge_b) = a_sub_b.split_at(a.len());
+            // a_new = (a_old >= b) ? (a_old - b) : a_old
+            a = if let [.., a_ge_b] = a_ge_b[..] {
+                self.ternary(a_ge_b, a_sub_b, &a)
+            } else {
+                unreachable!()
+            };
+            // truncate due to a_new should fit into b.len() at the end
+            a.truncate(b.len() - idx);
+        }
+
+        a
+    }
+
+    // fn rem_simple(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
+    //     let a_sub_b = self.sub(a, b);
+    //     let (a_sub_b, a_ge_b) = a_sub_b.split_at(a.len());
+    //     // a_new = (a_old >= b) ? (a_old - b) : a_old
+    //     let mut a = if let [.., a_ge_b] = a_ge_b[..] {
+    //         self.ternary(a_ge_b, a_sub_b, a)
+    //     } else {
+    //         unreachable!()
+    //     };
+    //     a.truncate(b.len());
+    //     a
+    // }
+
+    #[inline]
+    fn eq_zero(&mut self, a: &[Id]) -> Id {
+        match *a {
+            [] => todo!(),
+            [a] => self.egraph.add(Logic::Not(a)),
+            ref a => {
+                let a = a.iter().map(|&a| self.egraph.add(Logic::Not(a))).collect();
+                self.egraph.add(Logic::And(a))
+            }
+        }
+    }
+
+    /// Generates `a != 0`
+    #[inline]
+    fn ne_zero(&mut self, a: &[Id]) -> Id {
+        match *a {
+            [] => todo!(),
+            [a] => a,
+            ref a => {
+                let eq = self.eq_zero(a);
+                self.egraph.add(Logic::Not(eq))
+            }
+        }
+    }
+
+    #[inline]
+    fn ternary(&mut self, cond: Id, then: &[Id], or: &[Id]) -> Vec<Id> {
+        let inv_cond = self.egraph.add(Logic::Not(cond));
+
+        then.iter()
+            .zip_longest(or)
+            .map(|thenor| match thenor {
+                EitherOrBoth::Both(&then, &or) => {
+                    let then_cond = self.egraph.add(Logic::And(Box::new([then, cond])));
+                    let or_inv_cond = self.egraph.add(Logic::And(Box::new([or, inv_cond])));
+                    self.egraph
+                        .add(Logic::Xor(Box::new([then_cond, or_inv_cond])))
+                }
+                EitherOrBoth::Left(&then) => self.egraph.add(Logic::And(Box::new([then, cond]))),
+                EitherOrBoth::Right(&or) => self.egraph.add(Logic::And(Box::new([or, inv_cond]))),
+            })
+            .collect()
+    }
+
+    #[inline]
+    fn constant(&mut self, value: &BigUint) -> Vec<Id> {
+        (0..value.bits())
+            .map(|i| {
+                let bit = value.bit(i);
+                self.egraph.add(Logic::Const(bit))
+            })
+            .collect()
+    }
+
+    #[inline]
+    fn argument(&mut self, argument: &ArgumentInfo) -> Vec<Id> {
+        (0..argument.size)
+            .map(|index| {
+                self.egraph.add(Logic::Arg(ArgInfo {
+                    name: argument.name.clone(),
+                    index,
+                }))
+            })
+            .collect()
+    }
+
+    fn get_const(&mut self, id: Id) -> usize {
+        match &self.op_expr[id] {
+            Op::Constant(c) => c.clone().try_into().unwrap(),
+            _ => todo!(),
+        }
+    }
+
+    fn get_logic(&mut self, id: Id) -> Vec<Id> {
+        if let Some(cached) = self.op_cache.get(&id) {
+            return cached.clone();
+        }
+
+        let op = self.op_expr[id].clone();
+        let ids: Vec<_> = match op {
+            Op::Not(a) => {
+                let a = self.get_logic(a);
+
+                self.not(&a)
+            }
+            Op::Xor([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                self.xor(&a, &b)
+            }
+            Op::Or([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                self.or(&a, &b)
+            }
+            Op::And([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                self.and(&a, &b)
+            }
+            Op::Shr([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_const(b);
+
+                self.shr(&a, b)
+            }
+            Op::Shl([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_const(b);
+
+                self.shl(&a, b)
+            }
+            Op::Add([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                self.add(&a, &b)
+            }
+            Op::Sub([a, b]) => {
+                let _a = self.get_logic(a);
+                let _b = self.get_logic(b);
+
+                unimplemented!("{op}")
+            }
+            Op::Mul([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                self.mul(&a, &b)
+            }
+            Op::Div([a, b]) => {
+                let _a = self.get_logic(a);
+                let _b = self.get_logic(b);
+
+                unimplemented!("{op}")
+            }
+            Op::Rem([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                self.rem(&a, &b)
+            }
+            Op::Eq([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                let xor = self.xor(&a, &b);
+                vec![self.eq_zero(&xor)]
+            }
+            Op::Ne([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                let xor = self.xor(&a, &b);
+                vec![self.ne_zero(&xor)]
+            }
+            Op::Ternary([cond, then, or]) => {
+                let cond = self.get_logic(cond);
+                let then = self.get_logic(then);
+                let or = self.get_logic(or);
+
+                let cond = self.ne_zero(&cond);
+                self.ternary(cond, &then, &or)
+            }
+            Op::Constant(value) => self.constant(&value),
+            Op::Argument(argument) => self.argument(&argument),
+        };
+
+        self.op_cache.insert(id, ids.clone());
+        ids
     }
 }

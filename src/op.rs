@@ -40,6 +40,7 @@ define_language! {
         "//" = Div([Id; 2]),
         "%" = Rem([Id; 2]),
         "==" = Eq([Id; 2]),
+        "!=" = Ne([Id; 2]),
         "?" = Ternary([Id; 3]),
         Constant(BigUint),
         Argument(ArgumentInfo),
@@ -100,6 +101,13 @@ impl Analysis<Op> for Analyzer {
                     BigUint::one()
                 } else {
                     BigUint::zero()
+                }
+            }),
+            Op::Ne([a, b]) => Some({
+                if x(a)? == x(b)? {
+                    BigUint::zero()
+                } else {
+                    BigUint::one()
                 }
             }),
             Op::Ternary([cond, then, or]) => Some({
@@ -216,13 +224,12 @@ impl LpCostFunction<Op, Analyzer> for Cost {
             Op::And(_) => 6.0 * l,
             Op::Shr(_) => 0.2 * l,
             Op::Shl(_) => 0.4 * l,
-            Op::Add(_) => 32.0 * l,
-            Op::Sub(_) => 64.0 * l, // == 2 * node_cost(Op::Add)
+            Op::Add(_) | Op::Sub(_) => 32.0 * l,
+            Op::Eq(_) | Op::Ne(_) => 4.0 * l,
             Op::Mul(_) => 128.0 * l,
-            Op::Div(_) => todo!(),
+            Op::Div(_) => 128.0 * l,
             Op::Rem(_) => 256.0 * l,
-            Op::Eq(_) => todo!(),
-            Op::Ternary(_) => 16.0 * l,
+            Op::Ternary(_) => 128.0 * l,
             Op::Constant(_) => 0.1 * l,
             Op::Argument(_) => 0.1 * l,
         }
