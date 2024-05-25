@@ -213,7 +213,7 @@ pub struct ArgInfo {
     /// Name of argument with qubit
     pub name: String,
     /// Index of qubit in argument
-    pub index: u32,
+    pub index: usize,
 }
 
 impl Display for ArgInfo {
@@ -771,7 +771,7 @@ impl Logificator {
                 let b = self.get_logic(b);
 
                 let sub = self.sub(&a, &b);
-                vec![self.egraph.add(Logic::Not(sub[a.len()]))]
+                vec![self.egraph.add(Logic::Not(*sub.last().unwrap()))]
             }
             // == ! Le
             Op::Gt([a, b]) => {
@@ -779,7 +779,7 @@ impl Logificator {
                 let b = self.get_logic(b);
 
                 let sub = self.sub(&b, &a);
-                vec![self.egraph.add(Logic::Not(sub[a.len()]))]
+                vec![self.egraph.add(Logic::Not(*sub.last().unwrap()))]
             }
             Op::Ne([a, b]) => {
                 let a = self.get_logic(a);
@@ -793,14 +793,14 @@ impl Logificator {
                 let b = self.get_logic(b);
 
                 let sub = self.sub(&a, &b);
-                vec![sub[a.len()]]
+                vec![*sub.last().unwrap()]
             }
             Op::Le([a, b]) => {
                 let a = self.get_logic(a);
                 let b = self.get_logic(b);
 
                 let sub = self.sub(&b, &a);
-                vec![sub[a.len()]]
+                vec![*sub.last().unwrap()]
             }
             Op::Ternary([cond, then, or]) => {
                 let cond = self.get_logic(cond);

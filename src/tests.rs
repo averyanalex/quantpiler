@@ -141,41 +141,41 @@ fn rem_argument() {
 #[test]
 fn eq_expr() {
     Expression::argument("a", 32)
-        .eq(&Expression::argument("b", 32))
+        .eq(Expression::argument("b", 32))
         .compile();
 }
 
 #[test]
 fn lt_expr() {
     Expression::argument("a", 32)
-        .lt(&Expression::argument("b", 32))
+        .lt(Expression::argument("b", 32))
         .compile();
 }
 
 #[test]
 fn gt_expr() {
     Expression::argument("a", 32)
-        .gt(&Expression::argument("b", 32))
+        .gt(Expression::argument("b", 32))
         .compile();
 }
 
 #[test]
 fn ne_expr() {
     Expression::argument("a", 32)
-        .ne(&Expression::argument("b", 32))
+        .ne(Expression::argument("b", 32))
         .compile();
 }
 
 #[test]
 fn ge_expr() {
     Expression::argument("a", 32)
-        .ge(&Expression::argument("b", 32))
+        .ge(Expression::argument("b", 32))
         .compile();
 }
 
 #[test]
 fn le_expr() {
     Expression::argument("a", 32)
-        .le(&Expression::argument("b", 32))
+        .le(Expression::argument("b", 32))
         .compile();
 }

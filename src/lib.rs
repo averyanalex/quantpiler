@@ -24,7 +24,7 @@ pub mod circuit;
 pub mod compiler;
 #[cfg(test)]
 mod executor;
-mod expression;
+pub mod expression;
 mod extract;
 pub mod logic;
 pub mod op;

@@ -22,7 +22,7 @@ impl Expression {
     ///
     /// You can't use arguments with the same `name` but diffirent `size` in the same [Expression].
     #[must_use]
-    pub fn argument<N: Into<String>>(name: N, size: u32) -> Self {
+    pub fn argument<N: Into<String>>(name: N, size: usize) -> Self {
         Self(OP_EGRAPH.lock().unwrap().add(Op::Argument(ArgumentInfo {
             size,
             name: name.into(),
@@ -77,7 +77,8 @@ impl Expression {
         circuit
     }
 
-    pub fn eq(&self, other: &Self) -> Self {
+    #[must_use]
+    pub fn eq(self, other: Self) -> Self {
         Self(
             OP_EGRAPH
                 .lock()
@@ -86,7 +87,8 @@ impl Expression {
         )
     }
 
-    pub fn gt(&self, other: &Self) -> Self {
+    #[must_use]
+    pub fn gt(self, other: Self) -> Self {
         Self(
             OP_EGRAPH
                 .lock()
@@ -95,7 +97,8 @@ impl Expression {
         )
     }
 
-    pub fn lt(&self, other: &Self) -> Self {
+    #[must_use]
+    pub fn lt(self, other: Self) -> Self {
         Self(
             OP_EGRAPH
                 .lock()
@@ -104,7 +107,8 @@ impl Expression {
         )
     }
 
-    pub fn ne(&self, other: &Self) -> Self {
+    #[must_use]
+    pub fn ne(self, other: Self) -> Self {
         Self(
             OP_EGRAPH
                 .lock()
@@ -113,7 +117,8 @@ impl Expression {
         )
     }
 
-    pub fn le(&self, other: &Self) -> Self {
+    #[must_use]
+    pub fn le(self, other: Self) -> Self {
         Self(
             OP_EGRAPH
                 .lock()
@@ -122,7 +127,8 @@ impl Expression {
         )
     }
 
-    pub fn ge(&self, other: &Self) -> Self {
+    #[must_use]
+    pub fn ge(self, other: Self) -> Self {
         Self(
             OP_EGRAPH
                 .lock()
@@ -186,7 +192,7 @@ impl_op! {Rem, rem, Rem}
 #[cfg(feature = "python")]
 #[pyfunction]
 pub fn argument(name: String, size: u32) -> Expr {
-    Expr(Expression::argument(name, size))
+    Expr(Expression::argument(name, size as _))
 }
 
 #[cfg(feature = "python")]
@@ -374,12 +380,12 @@ impl Expr {
 
     fn __richcmp__(&self, other: RhsTypes, op: CompareOp) -> Self {
         match op {
-            CompareOp::Lt => Self(self.0.lt(&other.expr())),
-            CompareOp::Le => Self(self.0.le(&other.expr())),
-            CompareOp::Eq => Self(self.0.eq(&other.expr())),
-            CompareOp::Ne => Self(self.0.ne(&other.expr())),
-            CompareOp::Gt => Self(self.0.gt(&other.expr())),
-            CompareOp::Ge => Self(self.0.ge(&other.expr())),
+            CompareOp::Lt => Self(self.0.lt(other.expr())),
+            CompareOp::Le => Self(self.0.le(other.expr())),
+            CompareOp::Eq => Self(self.0.eq(other.expr())),
+            CompareOp::Ne => Self(self.0.ne(other.expr())),
+            CompareOp::Gt => Self(self.0.gt(other.expr())),
+            CompareOp::Ge => Self(self.0.ge(other.expr())),
         }
     }
 }

@@ -72,7 +72,7 @@ impl QubitRegister {
 #[cfg_attr(feature = "python", pyclass(get_all))]
 pub struct QubitDesc {
     pub reg: QubitRegister,
-    pub index: u32,
+    pub idx: usize,
 }
 
 #[derive(Debug, Default)]
@@ -102,7 +102,7 @@ impl Circuit {
                 let mut set = FxHashSet::default();
                 set.insert(QubitDesc {
                     reg: QubitRegister(QubitRegisterEnum::Ancillary),
-                    index: ancilla_idx,
+                    idx: ancilla_idx,
                 });
                 ancilla_idx += 1;
                 e.insert(set);
@@ -158,7 +158,7 @@ impl Circuit {
         for (qubit, values) in &self.qubits_map {
             for value in values {
                 if let QubitRegisterEnum::Argument(arg) = value.reg.clone().0 {
-                    qubits.insert(*qubit, args[&arg][value.index as usize]);
+                    qubits.insert(*qubit, args[&arg][value.idx]);
                 }
             }
         }
@@ -180,20 +180,20 @@ impl Circuit {
                 .map(|set| set
                     .iter()
                     .map(|desc| if desc.reg.0 == QubitRegisterEnum::Result {
-                        desc.index + 1
+                        desc.idx + 1
                     } else {
                         0
                     })
                     .max()
                     .unwrap())
                 .max()
-                .unwrap() as usize
+                .unwrap()
         ];
 
         for (qubit, values) in &self.qubits_map {
             for value in values {
                 if value.reg.0 == QubitRegisterEnum::Result {
-                    result[value.index as usize] = *qubits.get(qubit).unwrap_or(&false);
+                    result[value.idx] = *qubits.get(qubit).unwrap_or(&false);
                 }
             }
         }

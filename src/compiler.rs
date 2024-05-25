@@ -37,16 +37,16 @@ impl Compiler {
             .iter()
             .map(|(name, len)| {
                 let qubits = (0..(*len))
-                    .map(|i| {
-                        let q = circuit.get_ancilla_qubit();
+                    .map(|idx| {
+                        let anc = circuit.get_ancilla_qubit();
                         circuit.add_qubit_description(
-                            q,
+                            anc,
                             QubitDesc {
                                 reg: QubitRegister(QubitRegisterEnum::Argument(name.clone())),
-                                index: i,
+                                idx,
                             },
                         );
-                        q
+                        anc
                     })
                     .collect_vec();
                 (name.clone(), qubits)
@@ -65,7 +65,7 @@ impl Compiler {
             let graph_parent_id = graph.add_node(LogicNode {
                 kind,
                 qubit: if let Logic::Arg(arg) = parent {
-                    Some(args_qubits[&arg.name][arg.index as usize])
+                    Some(args_qubits[&arg.name][arg.index])
                 } else {
                     None
                 },
@@ -394,7 +394,7 @@ impl Compiler {
                 self.graph[node].qubit.unwrap(),
                 QubitDesc {
                     reg: QubitRegister(QubitRegisterEnum::Result),
-                    index: idx as u32,
+                    idx,
                 },
             );
         }

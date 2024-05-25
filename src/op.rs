@@ -8,7 +8,7 @@ use crate::extract::LpCostFunction;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ArgumentInfo {
-    pub size: u32,
+    pub size: usize,
     pub name: String,
 }
 
@@ -155,28 +155,6 @@ impl Analysis<Op> for Analyzer {
             Op::Argument(_) => None,
         };
         let value = make_value();
-
-        // let l = |i: &Id| egraph[*i].data.length;
-        // let length = match enode {
-        //     Op::Not(a) => l(a),
-        //     Op::Xor([a, b]) | Op::Or([a, b]) => l(a).max(l(b)),
-        //     Op::And([a, b]) => l(a).min(l(b)),
-        //     Op::Shr([target, distance]) => l(target).saturating_sub(
-        //         u32::try_from(x(distance).expect("bitshift distance must be constant")).unwrap(),
-        //     ),
-        //     Op::Shl([target, distance]) => l(target).saturating_add(
-        //         u32::try_from(x(distance).expect("bitshift distance must be constant")).unwrap(),
-        //     ),
-        //     Op::Add([a, b]) => l(a).max(l(b)).saturating_add(1),
-        //     Op::Sub(_) => todo!(),
-        //     Op::Mul([a, b]) => l(a).saturating_add(l(b)),
-        //     Op::Div(_) => todo!(),
-        //     Op::Rem(_) => todo!(),
-        //     Op::Eq(_) => todo!(),
-        //     Op::Ternary([_, then, or]) => l(then).max(l(or)),
-        //     Op::Constant(c) => biguint_to_bitvec(c).len() as u32,
-        //     Op::Argument(a) => a.size,
-        // };
 
         Self::Data { value }
     }
