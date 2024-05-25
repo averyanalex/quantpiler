@@ -35,10 +35,14 @@ define_language! {
         ">>" = Shr([Id; 2]),
         "<<" = Shl([Id; 2]),
         "+" = Add([Id; 2]),
+        "+%" = AddRem([Id; 3]),
         "-" = Sub([Id; 2]),
         "*" = Mul([Id; 2]),
+        "*%" = MulRem([Id; 3]),
         "//" = Div([Id; 2]),
         "%" = Rem([Id; 2]),
+        "**" = Pow([Id; 2]),
+        "**%" = PowRem([Id; 3]),
         "==" = Eq([Id; 2]),
         "<" = Lt([Id; 2]),
         ">" = Gt([Id; 2]),
@@ -50,18 +54,6 @@ define_language! {
         Argument(ArgumentInfo),
     }
 }
-
-// fn biguint_to_bitvec(v: &BigUint) -> Vec<bool> {
-//     let v = u64::try_from(v.clone()).unwrap();
-//     (0..64)
-//         .map(|i| ((v >> i) & 1) == 1)
-//         .rev()
-//         .skip_while(|x| !x)
-//         .collect_vec()
-//         .into_iter()
-//         .rev()
-//         .collect_vec()
-// }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AnalyzerData {
@@ -175,7 +167,9 @@ pub fn make_rules() -> Vec<Rewrite<Op, Analyzer>> {
         rw!("comm-or"; "(| ?a ?b)" => "(| ?b ?a)"),
         rw!("comm-and"; "(& ?a ?b)" => "(& ?b ?a)"),
         rw!("comm-add"; "(+ ?a ?b)" => "(+ ?b ?a)"),
+        rw!("comm-add-rem"; "(+% ?a ?b ?c)" => "(+% ?b ?a ?c)"),
         rw!("comm-mul"; "(* ?a ?b)" => "(* ?b ?a)"),
+        rw!("comm-mul-rem"; "(*% ?a ?b ?c)" => "(*% ?b ?a ?c)"),
         rw!("comm-eq"; "(== ?a ?b)" => "(== ?b ?a)"),
         // Associative
         rw!("assoc-xor"; "(^ ?a (^ ?b ?c))" => "(^ (^ ?a ?b) ?c)"),
@@ -209,6 +203,11 @@ pub fn make_rules() -> Vec<Rewrite<Op, Analyzer>> {
         rw!("not-xor-xor-not"; "(! (^ ?a ?b))" => "(^ (! ?a) ?b)"),
         rw!("create-mul-one"; "?a" => "(* ?a 1)"),
         rw!("merge-add-muls"; "(+ ?a (* ?a ?b))" => "(* ?a (+ 1 ?b))"),
+
+        // Mod(Op(_, _), _) => OpMod(_, _, _)
+        rw!("add-rem"; "(% (+ ?a ?b) ?c)" => "(+% ?a ?b ?c)"),
+        rw!("mul-rem"; "(% (* ?a ?b) ?c)" => "(*% ?a ?b ?c)"),
+        rw!("pow-rem"; "(% (** ?a ?b) ?c)" => "(**% ?a ?b ?c)"),
     ];
 
     // Distributivity
@@ -228,18 +227,18 @@ impl LpCostFunction<Op, Analyzer> for Cost {
 
         #[allow(clippy::match_same_arms)]
         match enode {
-            Op::Not(_) => 1.0 * l,
-            Op::Xor(_) => 4.0 * l,
-            Op::Or(_) => 8.0 * l,
-            Op::And(_) => 6.0 * l,
-            Op::Shr(_) => 0.2 * l,
-            Op::Shl(_) => 0.4 * l,
+            Op::Not(_) | Op::Shr(_) | Op::Shl(_) => 1.0 * l,
+            Op::Xor(_) | Op::And(_) => 2.0 * l,
+            Op::Or(_) => 5.0 * l, // a | b = !(!a & !b)
+            Op::Eq(_) | Op::Ne(_) | Op::Ternary(_) => 4.0 * l,
             Op::Add(_) | Op::Sub(_) | Op::Gt(_) | Op::Lt(_) | Op::Le(_) | Op::Ge(_) => 32.0 * l,
-            Op::Eq(_) | Op::Ne(_) => 4.0 * l,
-            Op::Mul(_) => 128.0 * l,
-            Op::Div(_) => 128.0 * l,
-            Op::Rem(_) => 256.0 * l,
-            Op::Ternary(_) => 128.0 * l,
+            Op::AddRem(_) => 64.0 * l,
+            Op::Mul(_) => 64.0 * l,
+            Op::MulRem(_) => (64.0 + 32.0) * l,
+            Op::Div(_) => todo!(),
+            Op::Rem(_) => 128.0 * l,
+            Op::Pow(_) => 128.0 * l,
+            Op::PowRem(_) => (128.0 + 32.0) * l,
             Op::Constant(_) => 0.1 * l,
             Op::Argument(_) => 0.1 * l,
         }

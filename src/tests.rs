@@ -126,7 +126,7 @@ fn many_xor() {
 
 #[test]
 fn rem_constant() {
-    (Expression::argument("a", 32) % Expression::constant(15u64)).compile();
+    (Expression::argument("a", 16) % Expression::constant(15u64)).compile();
 }
 
 #[test]
@@ -136,6 +136,45 @@ fn rem_argument() {
             + Expression::argument("c", 3)
             + Expression::constant(1u64)))
     .compile();
+}
+
+#[test]
+fn add_rem() {
+    let a = Expression::argument("a", 10);
+    let b = Expression::argument("b", 8);
+    let c = Expression::constant(37u64);
+    
+    let expr = Expression::add_rem(a, b, c);
+    let expr_1 = (a + b) % c;
+
+    assert_eq!(expr.clone().build(), expr_1.build());
+    expr.compile();
+}
+
+#[test]
+fn mul_rem() {
+    let a = Expression::argument("a", 10);
+    let b = Expression::argument("b", 8);
+    let c = Expression::constant(37u64);
+    
+    let expr = Expression::mul_rem(a, b, c);
+    let expr_1 = (a * b) % c;
+
+    assert_eq!(expr.clone().build(), expr_1.build());
+    expr.compile();
+}
+
+#[test]
+fn pow_rem() {
+    let a = Expression::argument("a", 10);
+    let b = Expression::argument("b", 8);
+    let c = Expression::constant(37u64);
+    
+    let expr = Expression::pow_rem(a, b, c);
+    let expr_1 = Expression::pow(a, b) % c;
+
+    assert_eq!(expr.clone().build(), expr_1.build());
+    expr.compile();
 }
 
 #[test]

@@ -497,6 +497,14 @@ impl Logificator {
         bits
     }
 
+    /// Generates `(a + b) % m`, where `a < m` and `b < m`.
+    #[inline]
+    fn add_rem(&mut self, a: &[Id], b: &[Id], m: &[Id]) -> Vec<Id> {
+        // `a+b < 2m`
+        let a_add_b = self.add(a, b);
+        self.rem_simple(&a_add_b, m)
+    }
+
     /// Generates `a - b`.
     fn sub(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
         let mut c = None;
@@ -555,63 +563,95 @@ impl Logificator {
     }
 
     /// Generates `a * b`.
-    fn mul(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
+    fn mul(&mut self, a: Vec<Id>, b: &[Id]) -> Vec<Id> {
         b.iter()
-            .enumerate()
-            .map(|(idx, &b_bit)| {
-                iter::repeat(Logic::Const(false))
-                    .take(idx)
-                    .chain(a.iter().map(|&a_bit| Logic::And(Box::new([a_bit, b_bit]))))
-                    .map(|l| self.egraph.add(l))
-                    .collect_vec()
+            .fold((vec![], a), |(a_mul_b, mut a), &b_bit| {
+                let x = self.ternary(b_bit, &a, &[]);
+                // a = a * 2
+                a.insert(0, self.egraph.add(Logic::Const(false)));
+                (self.add(&a_mul_b, &x), a)
             })
-            .collect_vec()
-            .into_iter()
-            .fold(vec![], |acc, x| self.add(&acc, &x))
+            .0
     }
 
-    /// Generates `a % b`
-    fn rem(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
+    /// Generates `(a * b) % m`, where `a < m`.
+    fn mul_rem(&mut self, a: Vec<Id>, b: &[Id], m: &[Id]) -> Vec<Id> {
+        b.iter()
+            .fold((vec![], a), |(a_mul_b, mut a), &b_bit| {
+                let x = self.ternary(b_bit, &a, &[]);
+                // a = a * 2
+                a.insert(0, self.egraph.add(Logic::Const(false)));
+                (self.add_rem(&a_mul_b, &x, m), self.rem_simple(&a, m))
+            })
+            .0
+    }
+
+    /// Generates `a ** b`.
+    fn pow(&mut self, a: Vec<Id>, b: &[Id]) -> Vec<Id> {
+        b.iter()
+            .fold((vec![], a), |(a_pow_b, a), &b_bit| {
+                let x = self.ternary(b_bit, &a, &[]);
+                // a = a ** 2
+                let a_sqr = self.mul(a.clone(), &a);
+                (self.mul(a_pow_b, &x), a_sqr)
+            })
+            .0
+    }
+
+    /// Generates `(a ** b) % m`, where `a < m`.
+    fn pow_rem(&mut self, a: Vec<Id>, b: &[Id], c: &[Id]) -> Vec<Id> {
+        b.iter()
+            .fold((vec![], a), |(a_pow_b, a), &b_bit| {
+                let x = self.ternary(b_bit, &a, &[]);
+                // a = a ** 2
+                let a_sqr = self.mul_rem(a.clone(), &a, c);
+                (self.mul_rem(a_pow_b, &x, c), a_sqr)
+            })
+            .0
+    }
+
+    /// Generates `a % m`.
+    fn rem(&mut self, mut a: Vec<Id>, m: &[Id]) -> Vec<Id> {
         let delta_size = a.len() - 1;
-        let b = iter::repeat(self.egraph.add(Logic::Const(false)))
+        let m = iter::repeat(self.egraph.add(Logic::Const(false)))
             .take(delta_size)
-            .chain(b.iter().copied())
+            .chain(m.iter().copied())
             .collect_vec();
-        let mut a = a.to_vec();
 
         for idx in 0..=delta_size {
-            debug_assert!(idx < b.len());
-            let a_sub_b = self.sub(&a, &b[idx..]);
-            // |a_sub_b| = |a - b[idx..]| = max(|a|, |b[idx..]|) + 1
-            // => |a_sub_b| >= |a| + 1
-            // => |a_sub_b| > |a|
-            debug_assert!(a_sub_b.len() > a.len());
-            let (a_sub_b, a_ge_b) = a_sub_b.split_at(a.len());
-            // a_new = (a_old >= b) ? (a_old - b) : a_old
-            a = if let [.., a_ge_b] = a_ge_b[..] {
-                self.ternary(a_ge_b, a_sub_b, &a)
+            debug_assert!(idx < m.len());
+            let a_sub_m = self.sub(&a, &m[idx..]);
+            // |a_sub_m| = |a - m[idx..]| = max(|a|, |m[idx..]|) + 1
+            // => |a_sub_m| >= |a| + 1
+            // => |a_sub_m| > |a|
+            debug_assert!(a_sub_m.len() > a.len());
+            let (a_sub_m, a_ge_m) = a_sub_m.split_at(a.len());
+            // a_new = (a_old >= m) ? (a_old - m) : a_old
+            a = if let [.., a_ge_m] = a_ge_m[..] {
+                self.ternary(a_ge_m, a_sub_m, &a)
             } else {
                 unreachable!()
             };
             // truncate due to a_new should fit into b.len() at the end
-            a.truncate(b.len() - idx);
+            a.truncate(m.len() - idx);
         }
 
         a
     }
 
-    // fn rem_simple(&mut self, a: &[Id], b: &[Id]) -> Vec<Id> {
-    //     let a_sub_b = self.sub(a, b);
-    //     let (a_sub_b, a_ge_b) = a_sub_b.split_at(a.len());
-    //     // a_new = (a_old >= b) ? (a_old - b) : a_old
-    //     let mut a = if let [.., a_ge_b] = a_ge_b[..] {
-    //         self.ternary(a_ge_b, a_sub_b, a)
-    //     } else {
-    //         unreachable!()
-    //     };
-    //     a.truncate(b.len());
-    //     a
-    // }
+    /// Generates `a % m`, where `a < 2m`.
+    fn rem_simple(&mut self, a: &[Id], m: &[Id]) -> Vec<Id> {
+        let a_sub_m = self.sub(a, m);
+        let (a_sub_m, a_ge_m) = a_sub_m.split_at(a.len());
+        // a_new = (a_old >= b) ? (a_old - b) : a_old
+        let mut a = if let [.., a_ge_m] = a_ge_m[..] {
+            self.ternary(a_ge_m, a_sub_m, a)
+        } else {
+            unreachable!()
+        };
+        a.truncate(m.len());
+        a
+    }
 
     #[inline]
     fn eq_zero(&mut self, a: &[Id]) -> Id {
@@ -734,6 +774,15 @@ impl Logificator {
 
                 self.add(&a, &b)
             }
+            Op::AddRem([a, b, c]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+                let c = self.get_logic(c);
+
+                let a = self.rem(a, &c);
+                let b = self.rem(b, &c);
+                self.add_rem(&a, &b, &c)
+            }
             Op::Sub([a, b]) => {
                 let a = self.get_logic(a);
                 let b = self.get_logic(b);
@@ -744,7 +793,16 @@ impl Logificator {
                 let a = self.get_logic(a);
                 let b = self.get_logic(b);
 
-                self.mul(&a, &b)
+                self.mul(a, &b)
+            }
+            Op::MulRem([a, b, c]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+                let c = self.get_logic(c);
+
+                let a = self.rem(a, &c);
+                let b = self.rem(b, &c);
+                self.mul_rem(a, &b, &c)
             }
             Op::Div([a, b]) => {
                 let _a = self.get_logic(a);
@@ -756,7 +814,21 @@ impl Logificator {
                 let a = self.get_logic(a);
                 let b = self.get_logic(b);
 
-                self.rem(&a, &b)
+                self.rem(a, &b)
+            }
+            Op::Pow([a, b]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+
+                self.pow(a, &b)
+            }
+            Op::PowRem([a, b, c]) => {
+                let a = self.get_logic(a);
+                let b = self.get_logic(b);
+                let c = self.get_logic(c);
+
+                let a = self.rem(a, &c);
+                self.pow_rem(a, &b, &c)
             }
             Op::Eq([a, b]) => {
                 let a = self.get_logic(a);

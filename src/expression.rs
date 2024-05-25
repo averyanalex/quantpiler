@@ -136,6 +136,46 @@ impl Expression {
                 .add(Op::Ge([self.id(), other.id()])),
         )
     }
+
+    #[must_use]
+    pub fn add_rem(self, rhs: Self, modulus: Self) -> Self {
+        Self(
+            OP_EGRAPH
+                .lock()
+                .unwrap()
+                .add(Op::AddRem([self.id(), rhs.id(), modulus.id()])),
+        )
+    }
+
+    #[must_use]
+    pub fn mul_rem(self, rhs: Self, modulus: Self) -> Self {
+        Self(
+            OP_EGRAPH
+                .lock()
+                .unwrap()
+                .add(Op::MulRem([self.id(), rhs.id(), modulus.id()])),
+        )
+    }
+
+    #[must_use]
+    pub fn pow(self, rhs: Self) -> Self {
+        Self(
+            OP_EGRAPH
+                .lock()
+                .unwrap()
+                .add(Op::Pow([self.id(), rhs.id()])),
+        )
+    }
+
+    #[must_use]
+    pub fn pow_rem(self, rhs: Self, modulus: Self) -> Self {
+        Self(
+            OP_EGRAPH
+                .lock()
+                .unwrap()
+                .add(Op::PowRem([self.id(), rhs.id(), modulus.id()])),
+        )
+    }
 }
 
 pub trait IntoId {
@@ -330,6 +370,14 @@ impl Expr {
         *self = self.__add__(rhs);
     }
 
+    fn add_rem(&self, rhs: RhsTypes, modulus: RhsTypes) -> Self {
+        Self(self.0.add_rem(rhs.expr(), modulus.expr()))
+    }
+
+    fn iadd_rem(&mut self, rhs: RhsTypes, modulus: RhsTypes) {
+        self.0 = self.0.add_rem(rhs.expr(), modulus.expr());
+    }
+
     fn __sub__(&self, rhs: RhsTypes) -> Self {
         Self(self.0 - rhs.expr())
     }
@@ -354,6 +402,14 @@ impl Expr {
         *self = self.__mul__(rhs);
     }
 
+    fn mul_rem(&self, rhs: RhsTypes, modulus: RhsTypes) -> Self {
+        Self(self.0.mul_rem(rhs.expr(), modulus.expr()))
+    }
+
+    fn imul_rem(&mut self, rhs: RhsTypes, modulus: RhsTypes) {
+        self.0 = self.0.mul_rem(rhs.expr(), modulus.expr());
+    }
+
     fn __floordiv__(&self, rhs: RhsTypes) -> Self {
         Self(self.0 / rhs.expr())
     }
@@ -376,6 +432,18 @@ impl Expr {
 
     fn __imod__(&mut self, rhs: RhsTypes) {
         *self = self.__mod__(rhs);
+    }
+
+    // fn __pow__(&self, rhs: RhsTypes) -> Self {
+    //     Self(self.0.pow(rhs.expr()))
+    // }
+
+    fn pow_rem(&self, rhs: RhsTypes, modulus: RhsTypes) -> Self {
+        Self(self.0.pow_rem(rhs.expr(), modulus.expr()))
+    }
+
+    fn ipow_rem(&mut self, rhs: RhsTypes, modulus: RhsTypes) {
+        self.0 = self.0.pow_rem(rhs.expr(), modulus.expr());
     }
 
     fn __richcmp__(&self, other: RhsTypes, op: CompareOp) -> Self {
