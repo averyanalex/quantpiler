@@ -1,8 +1,7 @@
 use std::{fmt::Display, str::FromStr};
 
 use egg::*;
-use itertools::Itertools;
-use num::{BigUint, FromPrimitive, One, Zero};
+use num::{traits::Pow, BigUint, ToPrimitive, Zero};
 
 use crate::extract::LpCostFunction;
 
@@ -61,6 +60,52 @@ pub struct AnalyzerData {
     // length: u32,
 }
 
+#[allow(clippy::cognitive_complexity)]
+pub fn eval_enode(
+    enode: &Op,
+    val: impl Fn(Id) -> Option<BigUint>,
+    arg: impl Fn(&'_ ArgumentInfo) -> Option<BigUint>,
+) -> Option<BigUint> {
+    Some(match *enode {
+        Op::Not(a) => BigUint::new(val(a)?.iter_u32_digits().map(|d| !d).collect()),
+        Op::Xor([a, b]) => val(a)? ^ val(b)?,
+        Op::Or([a, b]) => val(a)? | val(b)?,
+        Op::And([a, b]) => val(a)? & val(b)?,
+        Op::Shr([t, d]) => val(t)? >> val(d)?.to_u128()?,
+        Op::Shl([t, d]) => val(t)? << val(d)?.to_u128()?,
+        Op::Add([a, b]) => val(a)? + val(b)?,
+        Op::AddRem([a, b, c]) => {
+            let c = val(c)?;
+            ((val(a)? % &c) + (val(b)? % &c)) % &c
+        }
+        Op::Sub([a, b]) => val(a)? - val(b)?,
+        Op::Mul([a, b]) => val(a)? * val(b)?,
+        Op::MulRem([a, b, c]) => {
+            let c = val(c)?;
+            ((val(a)? % &c) * (val(b)? % &c)) % &c
+        }
+        Op::Div([a, b]) => val(a)? / val(b)?,
+        Op::Rem([a, b]) => val(a)? % val(b)?,
+        Op::Pow([a, b]) => Pow::pow(val(a)?, val(b)?.to_u128()?),
+        Op::PowRem([a, b, c]) => val(a)?.modpow(&val(b)?, &val(c)?),
+        Op::Eq([a, b]) => BigUint::from(val(a)? == val(b)?),
+        Op::Lt([a, b]) => BigUint::from(val(a)? < val(b)?),
+        Op::Gt([a, b]) => BigUint::from(val(a)? > val(b)?),
+        Op::Ne([a, b]) => BigUint::from(val(a)? != val(b)?),
+        Op::Ge([a, b]) => BigUint::from(val(a)? >= val(b)?),
+        Op::Le([a, b]) => BigUint::from(val(a)? <= val(b)?),
+        Op::Ternary([cond, then, or]) => {
+            if val(cond)?.is_zero() {
+                val(or)?
+            } else {
+                val(then)?
+            }
+        }
+        Op::Constant(ref c) => c.clone(),
+        Op::Argument(ref a) => arg(a)?,
+    })
+}
+
 #[derive(Default, Clone)]
 pub struct Analyzer;
 impl Analysis<Op> for Analyzer {
@@ -71,83 +116,7 @@ impl Analysis<Op> for Analyzer {
     }
 
     fn make(egraph: &EGraph<Op, Self>, enode: &Op) -> Self::Data {
-        let x = |i: &Id| egraph[*i].data.value.clone();
-        let make_value = || match enode {
-            Op::Not(a) => Some({
-                let digits = x(a)?.iter_u64_digits().map(|d| !d).collect_vec();
-                assert_eq!(digits.len(), 1);
-                BigUint::from_u64(!digits[0]).unwrap()
-            }),
-            Op::Xor([a, b]) => Some(x(a)? ^ x(b)?),
-            Op::Or([a, b]) => Some(x(a)? | x(b)?),
-            Op::And([a, b]) => Some(x(a)? & x(b)?),
-            Op::Shr([target, distance]) => {
-                Some(x(target)? >> u128::try_from(x(distance)?).unwrap())
-            }
-            Op::Shl([target, distance]) => {
-                Some(x(target)? << u128::try_from(x(distance)?).unwrap())
-            }
-            Op::Add([a, b]) => Some(x(a)? + x(b)?),
-            Op::Sub([a, b]) => Some(x(a)? - x(b)?),
-            Op::Mul([a, b]) => Some(x(a)? * x(b)?),
-            Op::Div([a, b]) => Some(x(a)? / x(b)?),
-            Op::Rem([a, b]) => Some(x(a)? % x(b)?),
-            Op::Eq([a, b]) => Some({
-                if x(a)? == x(b)? {
-                    BigUint::one()
-                } else {
-                    BigUint::zero()
-                }
-            }),
-            Op::Lt([a, b]) => Some({
-                if x(a)? < x(b)? {
-                    BigUint::one()
-                } else {
-                    BigUint::zero()
-                }
-            }),
-            Op::Gt([a, b]) => Some({
-                if x(a)? > x(b)? {
-                    BigUint::one()
-                } else {
-                    BigUint::zero()
-                }
-            }),
-            Op::Ne([a, b]) => Some({
-                if x(a)? == x(b)? {
-                    BigUint::zero()
-                } else {
-                    BigUint::one()
-                }
-            }),
-            Op::Ge([a, b]) => Some({
-                if x(a)? >= x(b)? {
-                    BigUint::one()
-                } else {
-                    BigUint::zero()
-                }
-            }),
-            Op::Le([a, b]) => Some({
-                if x(a)? <= x(b)? {
-                    BigUint::one()
-                } else {
-                    BigUint::zero()
-                }
-            }),
-            Op::Ternary([cond, then, or]) => Some({
-                if x(cond)?.is_one() {
-                    x(then)?
-                } else if x(cond)?.is_zero() {
-                    x(or)?
-                } else {
-                    panic!("expected condition to be 1 or 0, got {}", x(cond)?)
-                }
-            }),
-            Op::Constant(c) => Some(c.clone()),
-            Op::Argument(_) => None,
-        };
-        let value = make_value();
-
+        let value = eval_enode(enode, |i| egraph[i].data.value.clone(), |_| None);
         Self::Data { value }
     }
 
@@ -203,7 +172,6 @@ pub fn make_rules() -> Vec<Rewrite<Op, Analyzer>> {
         rw!("not-xor-xor-not"; "(! (^ ?a ?b))" => "(^ (! ?a) ?b)"),
         rw!("create-mul-one"; "?a" => "(* ?a 1)"),
         rw!("merge-add-muls"; "(+ ?a (* ?a ?b))" => "(* ?a (+ 1 ?b))"),
-
         // Mod(Op(_, _), _) => OpMod(_, _, _)
         rw!("add-rem"; "(% (+ ?a ?b) ?c)" => "(+% ?a ?b ?c)"),
         rw!("mul-rem"; "(% (* ?a ?b) ?c)" => "(*% ?a ?b ?c)"),

@@ -1,9 +1,11 @@
 use egg::{Id, Language, RecExpr};
-use itertools::Itertools;
-use num::{BigUint, FromPrimitive, One, Zero};
+use num::BigUint;
 use rustc_hash::FxHashMap;
 
-use crate::{logic::Logic, op::Op};
+use crate::{
+    logic::Logic,
+    op::{eval_enode, Op},
+};
 
 pub fn execute_logic(logic: &RecExpr<Logic>, args: &FxHashMap<String, Vec<bool>>) -> Vec<bool> {
     let mut done: FxHashMap<Id, bool> = FxHashMap::default();
@@ -37,76 +39,12 @@ pub fn execute_op(op: &RecExpr<Op>, args: &FxHashMap<String, BigUint>) -> BigUin
     let mut done: FxHashMap<Id, BigUint> = FxHashMap::default();
 
     for (idx, op) in op.as_ref().iter().enumerate() {
-        let result = match op {
-            Op::Not(arg) => {
-                let digits = done[arg].iter_u64_digits().map(|d| !d).collect_vec();
-                assert_eq!(digits.len(), 1);
-                BigUint::from_u64(!digits[0]).unwrap()
-            }
-            Op::Xor([a, b]) => done[a].clone() ^ done[b].clone(),
-            Op::Or([a, b]) => done[a].clone() | done[b].clone(),
-            Op::And([a, b]) => done[a].clone() & done[b].clone(),
-            Op::Shr([a, b]) => done[a].clone() >> u128::try_from(done[b].clone()).unwrap(),
-            Op::Shl([a, b]) => done[a].clone() << u128::try_from(done[b].clone()).unwrap(),
-            Op::Add([a, b]) => done[a].clone() + done[b].clone(),
-            Op::Sub([a, b]) => done[a].clone() - done[b].clone(),
-            Op::Mul([a, b]) => done[a].clone() * done[b].clone(),
-            Op::Div([a, b]) => done[a].clone() / done[b].clone(),
-            Op::Rem([a, b]) => done[a].clone() % done[b].clone(),
-            Op::Eq([a, b]) => {
-                if done[a] == done[b] {
-                    BigUint::one()
-                } else {
-                    BigUint::zero()
-                }
-            }
-            Op::Lt([a, b]) => {
-                if done[a] < done[b] {
-                    BigUint::one()
-                } else {
-                    BigUint::zero()
-                }
-            }
-            Op::Gt([a, b]) => {
-                if done[a] > done[b] {
-                    BigUint::one()
-                } else {
-                    BigUint::zero()
-                }
-            }
-            Op::Ne([a, b]) => {
-                if done[a] != done[b] {
-                    BigUint::one()
-                } else {
-                    BigUint::zero()
-                }
-            }
-            Op::Ge([a, b]) => {
-                if done[a] >= done[b] {
-                    BigUint::one()
-                } else {
-                    BigUint::zero()
-                }
-            }
-            Op::Le([a, b]) => {
-                if done[a] <= done[b] {
-                    BigUint::one()
-                } else {
-                    BigUint::zero()
-                }
-            }
-            Op::Ternary([cond, then, or]) => {
-                if done[cond].is_one() {
-                    done[then].clone()
-                } else if done[cond].is_zero() {
-                    done[or].clone()
-                } else {
-                    panic!("expected condition to be 1 or 0, got {}", done[cond])
-                }
-            }
-            Op::Constant(c) => c.clone(),
-            Op::Argument(arg) => args[&arg.name].clone(),
-        };
+        let result = eval_enode(
+            op,
+            |i| Some(done[&i].clone()),
+            |a| Some(args[&a.name].clone()),
+        )
+        .unwrap();
         done.insert(Id::from(idx), result);
     }
 

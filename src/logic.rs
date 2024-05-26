@@ -719,7 +719,7 @@ impl Logificator {
             .collect()
     }
 
-    fn get_const(&mut self, id: Id) -> usize {
+    fn get_const(&self, id: Id) -> usize {
         match &self.op_expr[id] {
             Op::Constant(c) => c.clone().try_into().unwrap(),
             _ => todo!(),

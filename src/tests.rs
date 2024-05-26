@@ -143,7 +143,7 @@ fn add_rem() {
     let a = Expression::argument("a", 10);
     let b = Expression::argument("b", 8);
     let c = Expression::constant(37u64);
-    
+
     let expr = Expression::add_rem(a, b, c);
     let expr_1 = (a + b) % c;
 
@@ -156,7 +156,7 @@ fn mul_rem() {
     let a = Expression::argument("a", 10);
     let b = Expression::argument("b", 8);
     let c = Expression::constant(37u64);
-    
+
     let expr = Expression::mul_rem(a, b, c);
     let expr_1 = (a * b) % c;
 
@@ -169,7 +169,7 @@ fn pow_rem() {
     let a = Expression::argument("a", 10);
     let b = Expression::argument("b", 8);
     let c = Expression::constant(37u64);
-    
+
     let expr = Expression::pow_rem(a, b, c);
     let expr_1 = Expression::pow(a, b) % c;
 
