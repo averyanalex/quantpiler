@@ -2,6 +2,8 @@
 
 import quantpiler
 
+style = "clifford"
+
 x_len = 4
 x = quantpiler.argument("x", x_len)
 
@@ -15,10 +17,10 @@ for i in range(x_len):
 circ = prod.compile()
 
 qc = quantpiler.circuit_to_qiskit(circ)
-qc.draw("mpl").savefig("example.png")
+qc.draw("mpl", style=style).savefig("example.png")
 
 qc = quantpiler.circuit_to_qiskit(circ, rev=True)
-qc.draw("mpl").savefig("example-rev.png")
+qc.draw("mpl", style=style).savefig("example-rev.png")
 
 a = quantpiler.argument("a", 2)
 b = quantpiler.argument("b", 4)
@@ -26,4 +28,4 @@ b = quantpiler.argument("b", 4)
 r = a ^ b + 3
 circ = r.compile()
 qc = quantpiler.circuit_to_qiskit(circ)
-qc.draw("mpl").savefig("guide.png")
+qc.draw("mpl", style=style).savefig("guide.png")

@@ -11,7 +11,7 @@ def circuit_to_qiskit(c: Circuit, rev=False) -> qiskit.circuit.QuantumCircuit:
     for qubit, qubit_descs in c.qubits_map_list():
         full_desc = []
         for desc in qubit_descs:
-            full_desc.append(f"{desc.reg.name()}_{desc.index}")
+            full_desc.append(f"{desc.reg.name()}_{desc.idx}")
         full_desc.sort()
         q = qiskit.circuit.Qubit()
         qubits[qubit.index] = q

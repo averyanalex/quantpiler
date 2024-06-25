@@ -16,18 +16,18 @@ crate-type = ["cdylib"]
 [dependencies]
 egg = "0.9.5"
 
-itertools = "0.12.0"
+itertools = "0.13.0"
 num = "0.4.1"
 rand = "0.8.5"
 rustc-hash = "1.1.0"
 petgraph = "0.6.4"
 log = "0.4.20"
 
-pyo3 = { version = "0.20.0", features = ["extension-module"], optional = true }
+pyo3 = { version = "0.22.0", features = ["extension-module"], optional = true }
 
 [features]
 python = ["pyo3"]
-# default = ["python"]
+default = ["python"]
 
 [profile.release]
 lto = "thin"

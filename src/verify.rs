@@ -30,7 +30,7 @@ pub fn verify(expr: &RecExpr<Op>, logic: &RecExpr<Logic>, circuit: &Circuit) {
             rng_bits_args.insert(
                 name.clone(),
                 std::iter::repeat_with(|| rng.gen())
-                    .take(*size as usize)
+                    .take(*size)
                     .collect::<Vec<_>>(),
             );
         }

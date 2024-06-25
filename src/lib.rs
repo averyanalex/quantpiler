@@ -1,5 +1,4 @@
 #![feature(let_chains)]
-#![feature(lazy_cell)]
 #![warn(clippy::pedantic, clippy::nursery)]
 #![allow(
     clippy::wildcard_imports,
@@ -41,10 +40,10 @@ use pyo3::prelude::*;
 
 #[cfg(feature = "python")]
 #[pymodule]
-fn quantpiler(_py: Python, m: &PyModule) -> PyResult<()> {
+pub fn quantpiler(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<expression::Expr>()?;
     m.add_class::<circuit::Circuit>()?;
-    m.add_wrapped(wrap_pyfunction!(expression::argument))?;
-    m.add_wrapped(wrap_pyfunction!(expression::constant))?;
+    m.add_function(wrap_pyfunction!(expression::argument, m)?)?;
+    m.add_function(wrap_pyfunction!(expression::constant, m)?)?;
     Ok(())
 }

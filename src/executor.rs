@@ -23,7 +23,7 @@ pub fn execute_logic(logic: &RecExpr<Logic>, args: &FxHashMap<String, Vec<bool>>
             Logic::Not(arg) => !done[arg],
             Logic::Register(_) => continue,
             Logic::Const(val) => *val,
-            Logic::Arg(arg) => args[&arg.name][arg.index as usize],
+            Logic::Arg(arg) => args[&arg.name][arg.index],
         };
         done.insert(Id::from(idx), result);
     }

@@ -147,7 +147,7 @@ fn add_rem() {
     let expr = Expression::add_rem(a, b, c);
     let expr_1 = (a + b) % c;
 
-    assert_eq!(expr.clone().build(), expr_1.build());
+    assert_eq!(expr.build(), expr_1.build());
     expr.compile();
 }
 
@@ -160,7 +160,7 @@ fn mul_rem() {
     let expr = Expression::mul_rem(a, b, c);
     let expr_1 = (a * b) % c;
 
-    assert_eq!(expr.clone().build(), expr_1.build());
+    assert_eq!(expr.build(), expr_1.build());
     expr.compile();
 }
 
@@ -173,7 +173,7 @@ fn pow_rem() {
     let expr = Expression::pow_rem(a, b, c);
     let expr_1 = Expression::pow(a, b) % c;
 
-    assert_eq!(expr.clone().build(), expr_1.build());
+    assert_eq!(expr.build(), expr_1.build());
     expr.compile();
 }
 
