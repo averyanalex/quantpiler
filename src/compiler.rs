@@ -97,7 +97,7 @@ impl Compiler {
     }
 
     /// Check if we can use node as dependency
-    fn is_node_available(&self, node_id: NodeIndex) -> bool {
+    fn is_node_available(&self, node_id: NodeIndex, allow_not_and: bool) -> bool {
         let node = &self.graph[node_id];
 
         (node.qubit.is_some()
@@ -109,10 +109,20 @@ impl Compiler {
                 LogicNodeKind::Xor | LogicNodeKind::Arg => false, // only can use XOR/Arg if qubit.is_some()
                 #[allow(clippy::match_same_arms)]
                 LogicNodeKind::Constant(_) => false, // there should be no gates dependent on constants
-                LogicNodeKind::Register | LogicNodeKind::And | LogicNodeKind::Not => self
+                LogicNodeKind::Register | LogicNodeKind::And => self
                     .graph
                     .neighbors_directed(node_id, Direction::Incoming)
-                    .all(|src_id| self.is_node_available(src_id)),
+                    .all(|src_id| self.is_node_available(src_id, allow_not_and)),
+                LogicNodeKind::Not => self
+                    .graph
+                    .neighbors_directed(node_id, Direction::Incoming)
+                    .all(|src_id| {
+                        self.is_node_available(src_id, false)
+                            && (allow_not_and
+                                || self.graph[src_id].kind != LogicNodeKind::And
+                                || (self.graph[src_id].kind == LogicNodeKind::And
+                                    && self.graph[src_id].qubit.is_some()))
+                    }),
             }
     }
 
@@ -169,6 +179,13 @@ impl Compiler {
                                 .unwrap();
 
                             assert_ne!(graph[arg_of_not].kind, LogicNodeKind::Not);
+
+                            dbg!(petgraph::dot::Dot::new(&graph));
+                            if arg_of_not == 16.into() {
+                                dbg!(arg_of_not);
+                                dbg!(source);
+                                dbg!(and);
+                            }
 
                             mcx_sources.insert((graph[arg_of_not].qubit.unwrap(), true));
                         }
@@ -290,11 +307,11 @@ impl Compiler {
                 .filter(|edge| !edge.weight().done) // skip already done edges
                 .filter(|edge| {
                     match self.graph[edge.target()].kind {
-                        LogicNodeKind::Xor | LogicNodeKind::Not | LogicNodeKind::Register => self.is_node_available(edge.source()),
-                        LogicNodeKind::And => self.graph.neighbors_directed(edge.target(), Direction::Incoming).all(|n| self.is_node_available(n)),
+                        LogicNodeKind::Xor | LogicNodeKind::Not | LogicNodeKind::Register => self.is_node_available(edge.source(), true),
+                        LogicNodeKind::And => self.graph.neighbors_directed(edge.target(), Direction::Incoming).all(|n| self.is_node_available(n, false)),
                         LogicNodeKind::Arg | LogicNodeKind::Constant(_) => unreachable!(),
                     }
-        }) // only edges available to process
+                }) // only edges available to process
                 .filter(|edge| {
                     self.graph
                         .neighbors_directed(edge.target(), Direction::Outgoing)
@@ -366,6 +383,11 @@ impl Compiler {
 
             if !did_something_optimal {
                 let Some(edge) = available_edges.first() else {
+                    dbg!(petgraph::dot::Dot::new(
+                        &self.graph,
+                        // &[petgraph::dot::Config:
+                        // [],
+                    ));
                     panic!("can't compile")
                 };
                 let (_, target) = self.graph.edge_endpoints(*edge).unwrap();
