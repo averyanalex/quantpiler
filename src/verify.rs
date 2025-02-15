@@ -1,11 +1,14 @@
 use egg::RecExpr;
-use rand::Rng;
+use num::Zero;
 use rustc_hash::FxHashMap;
+
+use rand::prelude::*;
+use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
 
 use crate::{circuit::Circuit, logic::Logic, op::Op};
 
 fn vec_bool_to_biguint(input: &[bool]) -> num::BigUint {
-    let mut res = <num::BigUint as num::Zero>::zero();
+    let mut res = num::BigUint::zero();
     for (idx, bit) in input.iter().enumerate() {
         if *bit {
             res += 2u128.pow(idx as u32);
@@ -24,12 +27,12 @@ pub fn verify(expr: &RecExpr<Op>, logic: &RecExpr<Logic>, circuit: &Circuit) {
 
     for _ in 0..8192 {
         let mut rng_bits_args = FxHashMap::default();
-        let mut rng = rand::thread_rng();
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
 
         for (name, size) in &arguments {
             rng_bits_args.insert(
                 name.clone(),
-                std::iter::repeat_with(|| rng.gen())
+                std::iter::repeat_with(|| rng.random())
                     .take(*size)
                     .collect::<Vec<_>>(),
             );
