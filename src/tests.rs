@@ -1,4 +1,4 @@
-use crate::expression::Expression;
+use crate::expression::{Expression, ExpressionScope};
 
 #[test]
 fn crc32() {
@@ -7,15 +7,17 @@ fn crc32() {
 
         (0..8u32)
             .map(|i| ch >> i)
-            .fold(Expression::constant(0u32), |table, ch| {
+            .fold(ch.scope().constant(0u32), |table, ch| {
                 ((ch ^ table) & 1u32).ternary((table >> 1u32) ^ poly, table >> 1u32)
             })
     }
 
     let size = 32;
 
-    let input = Expression::argument("input", size);
-    let mut value = Expression::constant(0xFFFF_FFFF_u32);
+    let scope = ExpressionScope::new();
+
+    let input = scope.argument("input", size);
+    let mut value = scope.constant(0xFFFF_FFFF_u32);
 
     for byte in (0..(size / 8)).map(|i| (input >> (i * 8)) & 0xFFu32) {
         let ch = (byte ^ value) & 0xFFu32;
@@ -27,8 +29,10 @@ fn crc32() {
 
 #[test]
 fn example() {
-    let a = Expression::argument("input", 3);
-    let b = Expression::argument("b", 2);
+    let scope = ExpressionScope::new();
+
+    let a = scope.argument("input", 3);
+    let b = scope.argument("b", 2);
     let add = a + b;
     let xor = add ^ 0b100u32;
     let and_const = xor & 0b111u32;
