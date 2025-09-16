@@ -4,11 +4,11 @@
 
 # Сompiler of classical algorithms into oracles for quantum computing
 
-## Achievements:
+## Achievements
 
 - CRC32 hash function (4 byte input) - 116 qubits.
 
-## Architecture:
+## Architecture
 
 1. Building expression.
 2. Optimizing expression.
@@ -18,13 +18,7 @@
    allocations).
 5. Generation of a quantum circuit from a DAG of logical gates.
 
-## Authors:
-
-- Alexander Averyanov - author
-- Evgeny Kiktenko - mentor
-- Dmitry Ershov - helped with the optimizer design
-
-## Example:
+## Example
 
 ```python
 import quantpiler
@@ -110,7 +104,7 @@ Length is the **maximum possible** length of result. Actual length depends on
 optimizer decitions: for example, the length of `a ^ a` will be 0 (no qubits,
 empty expression).
 
-#### Estimating length of expression:
+#### Estimating length of expression
 
 ```python
 # you can use builtin python's len to get estimated expression's length
@@ -120,7 +114,7 @@ length = len(a ^ b + 1)
 Please note that this is an **estimated** length as actual length may vary depending
 optimizer solutions.
 
-#### Debugging expression:
+#### Debugging expression
 
 ```python
 print(str(a ^ b + 1))
