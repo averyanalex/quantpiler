@@ -1,4 +1,4 @@
-use std::{fmt::Display, iter, str::FromStr};
+use std::{fmt::Display, str::FromStr};
 
 use egg::*;
 use itertools::{EitherOrBoth, Itertools};
@@ -33,7 +33,7 @@ pub enum EGraphRef<'a> {
     Mutable(&'a mut EGraph<Logic, Analyzer>),
 }
 
-impl<'a> EGraphRef<'a> {
+impl EGraphRef<'_> {
     fn get_optimized_logic(&self, id: Id) -> Logic {
         match self {
             EGraphRef::Immutable(e) => e[id].data.optimized.clone(),
@@ -280,7 +280,7 @@ impl Analysis<Logic> for Analyzer {
         egg::merge_max(to, from)
     }
 
-    fn make(egraph: &EGraph<Logic, Self>, enode: &Logic) -> Self::Data {
+    fn make(egraph: &mut EGraph<Logic, Self>, enode: &Logic) -> Self::Data {
         let xc = |i: &Id| egraph[*i].data.value;
 
         let make_value = || match enode {
@@ -450,8 +450,7 @@ impl Logificator {
 
     #[inline]
     fn shl(&mut self, a: &[Id], b: usize) -> Vec<Id> {
-        iter::repeat(self.egraph.add(Logic::Const(false)))
-            .take(b)
+        std::iter::repeat_n(self.egraph.add(Logic::Const(false)), b)
             .chain(a.iter().copied())
             .collect()
     }
@@ -613,8 +612,7 @@ impl Logificator {
     /// Generates `a % m`.
     fn rem(&mut self, mut a: Vec<Id>, m: &[Id]) -> Vec<Id> {
         let delta_size = a.len() - 1;
-        let m = iter::repeat(self.egraph.add(Logic::Const(false)))
-            .take(delta_size)
+        let m = std::iter::repeat_n(self.egraph.add(Logic::Const(false)), delta_size)
             .chain(m.iter().copied())
             .collect_vec();
 

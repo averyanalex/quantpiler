@@ -128,7 +128,7 @@ impl Circuit {
             .insert(description);
     }
 
-    pub fn get_ancilla_qubit(&mut self) -> Qubit {
+    pub const fn get_ancilla_qubit(&mut self) -> Qubit {
         let q = Qubit::new(self.qubits_count);
         self.qubits_count += 1;
         q

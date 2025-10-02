@@ -115,7 +115,7 @@ impl Analysis<Op> for Analyzer {
         egg::merge_max(to, from)
     }
 
-    fn make(egraph: &EGraph<Op, Self>, enode: &Op) -> Self::Data {
+    fn make(egraph: &mut EGraph<Op, Self>, enode: &Op) -> Self::Data {
         let value = eval_enode(enode, |i| egraph[i].data.value.clone(), |_| None);
         Self::Data { value }
     }
